@@ -1,0 +1,2 @@
+patches/** -text
+*.sh text eol=lf
