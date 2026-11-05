@@ -6,18 +6,18 @@ Subject: [PATCH] mouse-passthrough-events: Add the public API and shared event
 
 ---
  CMakeLists.txt                    |   3 +
- include/XDL/XDL.h                 |  86 ++++++++++++++++++
+ include/XDL/XDL.h                 |  90 +++++++++++++++++
  src/dynapi/SDL_dynapi.c           |   5 +-
  src/dynapi/SDL_dynapi.sym         |   1 +
  src/dynapi/SDL_dynapi_overrides.h |   1 +
  src/dynapi/SDL_dynapi_procs.h     |   1 +
  src/events/SDL_events.c           |   1 +
- src/events/SDL_mouse.c            | 143 +++++++++++++++++++++++++++++-
+ src/events/SDL_mouse.c            | 155 +++++++++++++++++++++++++++++-
  src/events/SDL_mouse_c.h          |  27 ++++++
  src/video/SDL_sysvideo.h          |   2 +
  src/video/SDL_video.c             |  28 ++++++
  test/testsymbols.c                |   1 +
- 12 files changed, 297 insertions(+), 2 deletions(-)
+ 12 files changed, 309 insertions(+), 6 deletions(-)
  create mode 100644 include/XDL/XDL.h
 
 diff --git a/CMakeLists.txt b/CMakeLists.txt
@@ -36,10 +36,10 @@ index 8ff836807771ee0a6fad1a60ce49c2823908d737..bc2f97f26eca8b00bf2477980f6fc8ca
          DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/SDL3"
 diff --git a/include/XDL/XDL.h b/include/XDL/XDL.h
 new file mode 100644
-index 0000000000000000000000000000000000000000..402ebac78f3a06aff953ccc7f52f39565f7e1720
+index 0000000000000000000000000000000000000000..af7afa4ab1a01b0b35fcb0966960fb60d493eca7
 --- /dev/null
 +++ b/include/XDL/XDL.h
-@@ -0,0 +1,86 @@
+@@ -0,0 +1,90 @@
 +/*
 +  XDL
 +  Copyright (C) 2026 Stan (stanoddly)
@@ -99,8 +99,12 @@ index 0000000000000000000000000000000000000000..402ebac78f3a06aff953ccc7f52f3956
 + * current mouse focus, usually 0.
 + *
 + * A press reported this way never captures the mouse, so the window beneath
-+ * keeps receiving the drag. Hidden and minimized windows, and a window that
-+ * captures the mouse, receive nothing this way.
++ * keeps receiving the drag. Hidden and minimized windows receive nothing this
++ * way, and no window does while a window captures the mouse, except the
++ * release of a reported press.
++ *
++ * If windows with this enabled overlap, only one of them receives the input,
++ * and which one does not depend on their stacking order.
 + *
 + * This is supported on Windows, macOS, and X11 with XInput 2.1 or later. It
 + * is not supported on Wayland, and under Xwayland it receives no input
@@ -192,10 +196,18 @@ index 06f1053cf6eb9858b7fb1d16aeefd16b87384c43..a94f749fcd2118a80b946be9028f2365
  
      SDL_PumpEventMaintenance();
 diff --git a/src/events/SDL_mouse.c b/src/events/SDL_mouse.c
-index eaf1f2cdfdfb03b3f1c761df65540c3b8641969b..16d0e8d98bc686c46e709183d411592ee883ce4e 100644
+index eaf1f2cdfdfb03b3f1c761df65540c3b8641969b..9114c51cb47dbc8d37a8d5339e1c23d2278d7f07 100644
 --- a/src/events/SDL_mouse.c
 +++ b/src/events/SDL_mouse.c
-@@ -919,6 +919,14 @@ static void SDL_PrivateSendMouseButton(Uint64 timestamp, SDL_Window *window, SDL
+@@ -912,6 +912,7 @@ static void SDL_PrivateSendMouseButton(Uint64 timestamp, SDL_Window *window, SDL
+     SDL_EventType type;
+     Uint32 buttonstate;
+     SDL_MouseInputSource *source;
++    SDL_Window *touch_window = window;
+ 
+     source = GetMouseInputSource(mouse, mouseID, down, button);
+     if (!source) {
+@@ -919,6 +920,18 @@ static void SDL_PrivateSendMouseButton(Uint64 timestamp, SDL_Window *window, SDL
      }
      buttonstate = source->buttonstate;
  
@@ -203,6 +215,10 @@ index eaf1f2cdfdfb03b3f1c761df65540c3b8641969b..16d0e8d98bc686c46e709183d411592e
 +       a release to the source holding the button. Touch and pen releases are synthesized, so they never end a real press. */
 +    if (!down && source->mouseID == SDL_GLOBAL_MOUSE_ID && mouseID != SDL_TOUCH_MOUSEID && mouseID != SDL_PEN_MOUSEID &&
 +        button >= SDL_BUTTON_LEFT && button <= SDL_BUTTON_X2) {
++        // A forwarded release can have no window, but its synthetic touch must still end in the window that got the press.
++        if (!touch_window) {
++            touch_window = mouse->forwarded_button_windows[button];
++        }
 +        mouse->forwarded_buttons &= ~SDL_BUTTON_MASK(button);
 +        mouse->forwarded_button_windows[button] = NULL;
 +    }
@@ -210,7 +226,23 @@ index eaf1f2cdfdfb03b3f1c761df65540c3b8641969b..16d0e8d98bc686c46e709183d411592e
      // SDL_HINT_MOUSE_TOUCH_EVENTS: controlling whether mouse events should generate synthetic touch events
      if (mouse->mouse_touch_events) {
          if (mouseID != SDL_TOUCH_MOUSEID && mouseID != SDL_PEN_MOUSEID && button == SDL_BUTTON_LEFT) {
-@@ -1031,6 +1039,138 @@ void SDL_SendMouseButton(Uint64 timestamp, SDL_Window *window, SDL_MouseID mouse
+@@ -927,11 +940,11 @@ static void SDL_PrivateSendMouseButton(Uint64 timestamp, SDL_Window *window, SDL
+             } else {
+                 track_mouse_down = false;
+             }
+-            if (window) {
++            if (touch_window) {
+                 type = track_mouse_down ? SDL_EVENT_FINGER_DOWN : SDL_EVENT_FINGER_UP;
+-                float normalized_x = mouse->x / (float)window->w;
+-                float normalized_y = mouse->y / (float)window->h;
+-                SDL_SendTouch(timestamp, SDL_MOUSE_TOUCHID, SDL_BUTTON_LEFT, window, type, normalized_x, normalized_y, 1.0f);
++                float normalized_x = mouse->x / (float)touch_window->w;
++                float normalized_y = mouse->y / (float)touch_window->h;
++                SDL_SendTouch(timestamp, SDL_MOUSE_TOUCHID, SDL_BUTTON_LEFT, touch_window, type, normalized_x, normalized_y, 1.0f);
+             }
+         }
+     }
+@@ -1031,6 +1044,137 @@ void SDL_SendMouseButton(Uint64 timestamp, SDL_Window *window, SDL_MouseID mouse
      SDL_PrivateSendMouseButton(timestamp, window, mouseID, button, down, -1);
  }
  
@@ -255,23 +287,22 @@ index eaf1f2cdfdfb03b3f1c761df65540c3b8641969b..16d0e8d98bc686c46e709183d411592e
 +{
 +    SDL_Mouse *mouse = SDL_GetMouse();
 +    float x = 0.0f, y = 0.0f;
++
++    // A capture gives the capturing window all input. It keeps the focus, because the captured release takes its window ID from the focus.
++    if (mouse->capture_window) {
++        return NULL;
++    }
++
 +    SDL_Window *target = SDL_FindMousePassthroughWindow(locate, userdata, &x, &y);
 +    SDL_Window *last = mouse->passthrough_window;
 +
-+    if (last && last != target) {
-+        // A capture keeps the focus, because the captured release takes its window ID from the focus.
-+        if (last->flags & SDL_WINDOW_MOUSE_CAPTURE) {
-+            if (!target) {
-+                return NULL;
-+            }
-+        } else if (mouse->focus == last) {
-+            float last_x, last_y;
-+            if (locate(last, userdata, &last_x, &last_y) && !SDL_IsInsideWindowArea(last, last_x, last_y)) {
-+                // SDL clamps this motion to the window's edge and sends the leave.
-+                SDL_SendMouseMotion(timestamp, last, SDL_GLOBAL_MOUSE_ID, false, last_x, last_y);
-+            } else {
-+                SDL_SetMouseFocus(NULL);
-+            }
++    if (last && last != target && mouse->focus == last) {
++        float last_x, last_y;
++        if (locate(last, userdata, &last_x, &last_y) && !SDL_IsInsideWindowArea(last, last_x, last_y)) {
++            // SDL clamps this motion to the window's edge and sends the leave.
++            SDL_SendMouseMotion(timestamp, last, SDL_GLOBAL_MOUSE_ID, false, last_x, last_y);
++        } else {
++            SDL_SetMouseFocus(NULL);
 +        }
 +    }
 +    mouse->passthrough_window = target;
@@ -303,14 +334,14 @@ index eaf1f2cdfdfb03b3f1c761df65540c3b8641969b..16d0e8d98bc686c46e709183d411592e
 +    // The button event takes its position from the motion before it.
 +    SDL_Window *target = SDL_MovePassthroughPointer(timestamp, locate, userdata);
 +    if (down) {
-+        // A press outside every window's area is not reported. A press of a button that is already held would be ignored, so it does not own the button.
++        // A press outside every window's area or during a capture is not reported. A press of a button that is already held would be ignored, so it does not own the button.
 +        if (!target || (SDL_GetMouseButtonState(mouse, SDL_GLOBAL_MOUSE_ID, false) & mask)) {
 +            return;
 +        }
 +        mouse->forwarded_buttons |= mask;
 +        mouse->forwarded_button_windows[button] = target;
 +    }
-+    // A release outside every window's area has no window, so it clears the button without taking the focus back at the clamped position.
++    // A release outside every window's area or during a capture has no window, so it clears the button without taking the focus back at the clamped position.
 +    SDL_SendMouseButton(timestamp, target, SDL_GLOBAL_MOUSE_ID, button, down);
 +}
 +
@@ -349,7 +380,7 @@ index eaf1f2cdfdfb03b3f1c761df65540c3b8641969b..16d0e8d98bc686c46e709183d411592e
  void SDL_SendMouseWheel(Uint64 timestamp, SDL_Window *window, SDL_MouseID mouseID, float x, float y, SDL_MouseWheelDirection direction)
  {
      SDL_Mouse *mouse = SDL_GetMouse();
-@@ -1439,7 +1579,8 @@ bool SDL_UpdateMouseCapture(bool force_release)
+@@ -1439,7 +1583,8 @@ bool SDL_UpdateMouseCapture(bool force_release)
  
      if (!force_release) {
          if (SDL_GetMessageBoxCount() == 0 &&

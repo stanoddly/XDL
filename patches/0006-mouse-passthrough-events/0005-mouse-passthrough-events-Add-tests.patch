@@ -6,8 +6,8 @@ Subject: [PATCH] mouse-passthrough-events: Add tests
 ---
  test/CMakeLists.txt         |   1 +
  test/testautomation_video.c |  46 +++++++
- test/testmousepassthrough.c | 240 ++++++++++++++++++++++++++++++++++++
- 3 files changed, 287 insertions(+)
+ test/testmousepassthrough.c | 239 ++++++++++++++++++++++++++++++++++++
+ 3 files changed, 286 insertions(+)
  create mode 100644 test/testmousepassthrough.c
 
 diff --git a/test/CMakeLists.txt b/test/CMakeLists.txt
@@ -102,10 +102,10 @@ index fe5436bc85e9b0db3b4a7e1353ae7d6919ce76f2..e5a7cc6f69a4d0409aac308dde6790d9
  
 diff --git a/test/testmousepassthrough.c b/test/testmousepassthrough.c
 new file mode 100644
-index 0000000000000000000000000000000000000000..ede0922b3d27616631c55f31f9c5a5822463874e
+index 0000000000000000000000000000000000000000..ccf9d6ef6f4c4937db58d12dff1859e3d3c39b8c
 --- /dev/null
 +++ b/test/testmousepassthrough.c
-@@ -0,0 +1,240 @@
+@@ -0,0 +1,239 @@
 +/*
 +  Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
 +
@@ -121,9 +121,9 @@ index 0000000000000000000000000000000000000000..ede0922b3d27616631c55f31f9c5a582
 +/* An always-on-top transparent window that lets all mouse input through to the windows beneath it, and reports that input with
 +   XDL_SetWindowMousePassthroughEvents(). It logs each mouse event and draws a dot where the pointer is. It waits for events and redraws only
 +   when something changed, so it uses almost no CPU. It uses the software renderer, which draws into a window whose shape lets all input
-+   through on every platform.
++   through on every platform. Where passthrough events are unsupported, such as on Wayland, it logs that and still sets the shape, to test only that.
 +
-+   --opaque  makes a square in the middle of the window opaque, so the window receives the input there itself.
++   --opaque makes a square in the middle of the window opaque, so the window receives the input there itself.
 +   --fullscreen  covers the display instead, like a desktop overlay. It cannot be combined with --opaque.
 +   --toggle N  turns the passthrough events off and on again every N seconds.
 +   --seconds N  quits after N seconds. Otherwise quit with Ctrl+C, or with Escape while the window has keyboard focus. */
@@ -249,12 +249,11 @@ index 0000000000000000000000000000000000000000..ede0922b3d27616631c55f31f9c5a582
 +        SDL_Quit();
 +        return 1;
 +    }
-+    if (!XDL_SetWindowMousePassthroughEvents(window, true)) {
-+        SDL_Log("XDL_SetWindowMousePassthroughEvents failed: %s", SDL_GetError());
-+        SDL_Quit();
-+        return 1;
++    if (XDL_SetWindowMousePassthroughEvents(window, true)) {
++        SDL_Log("Window %" SDL_PRIu32 " receives mouse passthrough events", SDL_GetWindowID(window));
++    } else {
++        SDL_Log("Testing only the shape, because XDL_SetWindowMousePassthroughEvents failed: %s", SDL_GetError());
 +    }
-+    SDL_Log("Window %" SDL_PRIu32 " receives mouse passthrough events", SDL_GetWindowID(window));
 +    if (toggle_interval) {
 +        next_toggle = SDL_GetTicks() + toggle_interval;
 +    }

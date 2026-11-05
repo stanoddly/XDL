@@ -5,20 +5,20 @@ Subject: [PATCH] window-shape-passthrough: Let a fully transparent window
  shape pass input through on Wayland and Windows
 
 ---
- src/video/wayland/SDL_waylandshape.c | 90 ++++++++++++++++++++++++++++
+ src/video/wayland/SDL_waylandshape.c | 91 ++++++++++++++++++++++++++++
  src/video/wayland/SDL_waylandshape.h | 28 +++++++++
  src/video/wayland/SDL_waylandvideo.c |  2 +
  src/video/windows/SDL_windowsshape.c | 61 +++++++++++++++++++
- 4 files changed, 181 insertions(+)
+ 4 files changed, 182 insertions(+)
  create mode 100644 src/video/wayland/SDL_waylandshape.c
  create mode 100644 src/video/wayland/SDL_waylandshape.h
 
 diff --git a/src/video/wayland/SDL_waylandshape.c b/src/video/wayland/SDL_waylandshape.c
 new file mode 100644
-index 0000000000000000000000000000000000000000..69b20adc5acdfbd8f0dfe1dfaef1bda5c80dc19e
+index 0000000000000000000000000000000000000000..c5cc01ee8c3ce70de69f1814fdf890ea66efbefe
 --- /dev/null
 +++ b/src/video/wayland/SDL_waylandshape.c
-@@ -0,0 +1,90 @@
+@@ -0,0 +1,91 @@
 +/*
 +  Simple DirectMedia Layer
 +  Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
@@ -67,8 +67,9 @@ index 0000000000000000000000000000000000000000..69b20adc5acdfbd8f0dfe1dfaef1bda5
 +        return true;
 +    }
 +
-+    if (shape->w != window->w || shape->h != window->h) {
-+        stretched = SDL_CreateSurface(window->w, window->h, SDL_PIXELFORMAT_ARGB32);
++    // A region is in surface coordinates, which differ from window coordinates when scaling to the display or emulating a fullscreen mode.
++    if (shape->w != data->current.logical_width || shape->h != data->current.logical_height) {
++        stretched = SDL_CreateSurface(data->current.logical_width, data->current.logical_height, SDL_PIXELFORMAT_ARGB32);
 +        if (!stretched) {
 +            return false;
 +        }
