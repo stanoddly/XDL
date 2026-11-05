@@ -22,6 +22,10 @@ To add a step, commit it in `build/SDL` at its place in the series, with `git re
 
 Create `patches/NNNN-name/README.md` with a plain title, what the patch does and why, and a `## Testing` section. Add `## Depends on` or `## When to drop it` only when there is something real to say. Then add commits with `name: ` subjects and export.
 
+## Adding to the public API
+
+Declare it in `include/XDL/XDL.h` with an `XDL_` prefix, and append it to `SDL_dynapi_procs.h`, `SDL_dynapi_overrides.h` and `SDL_dynapi.sym`. If it changes XDL's dynamic API table in an incompatible way, increase the counter in `SDL_DYNAPI_VERSION`.
+
 ## Moving to a new SDL release
 
 1. Move the submodule, with full history: `git -C external/SDL fetch --tags origin`, `git -C external/SDL checkout <new-tag>`, `git add external/SDL`.
