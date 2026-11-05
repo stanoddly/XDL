@@ -4,6 +4,12 @@ XDL is an altered version of [SDL](https://github.com/libsdl-org/SDL). It is not
 
 The repo holds patches, not SDL source. `external/SDL` pins a released SDL tag, and `tools/apply.sh` applies `patches/` to it in `build/SDL`, which git ignores.
 
+## Why XDL exists
+
+SDL does not accept contributions made with generative AI, and XDL respects that rule. A developer who uses an agent to fix an SDL bug therefore cannot share the fix through SDL.
+
+XDL is for those developers. A fix becomes a patch here, so others can benefit from it, and nothing LLM-written goes to SDL. [AGENTS.md](AGENTS.md) tells an agent how to work in this repo.
+
 ## Build
 
 ```sh
