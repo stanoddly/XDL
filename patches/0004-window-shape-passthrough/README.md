@@ -2,7 +2,7 @@
 
 Makes `SDL_SetWindowShape` usable for a transparent window that takes no input:
 
-- **Wayland:** adds shape support, which stock SDL lacks. The shape becomes the surface's input region, so transparent pixels pass input through. A new shape takes effect at the window's next present, so the click area matches what is on screen. An app that changes only the shape must present once.
+- **Wayland:** adds shape support, which stock SDL lacks. The shape becomes the surface's input region, so transparent pixels pass input through. A new shape takes effect at the surface's next commit, normally the window's next present, so the click area matches what is on screen. An app that changes only the shape must present once.
 - **Windows:** a window region clips drawing as well as input, so an empty region would hide the window. A transparent window whose shape has no opaque pixel now stays visible and uses `WS_EX_TRANSPARENT` instead.
 
 ## Testing

@@ -5,11 +5,12 @@ Subject: [PATCH] window-shape-passthrough: Let a fully transparent window
  shape pass input through on Wayland and Windows
 
 ---
- src/video/wayland/SDL_waylandshape.c | 91 ++++++++++++++++++++++++++++
- src/video/wayland/SDL_waylandshape.h | 28 +++++++++
- src/video/wayland/SDL_waylandvideo.c |  2 +
- src/video/windows/SDL_windowsshape.c | 61 +++++++++++++++++++
- 4 files changed, 182 insertions(+)
+ src/video/wayland/SDL_waylandshape.c  | 91 +++++++++++++++++++++++++++
+ src/video/wayland/SDL_waylandshape.h  | 28 +++++++++
+ src/video/wayland/SDL_waylandvideo.c  |  2 +
+ src/video/wayland/SDL_waylandwindow.c |  7 +++
+ src/video/windows/SDL_windowsshape.c  | 61 ++++++++++++++++++
+ 5 files changed, 189 insertions(+)
  create mode 100644 src/video/wayland/SDL_waylandshape.c
  create mode 100644 src/video/wayland/SDL_waylandshape.h
 
@@ -164,6 +165,31 @@ index 2f31581cf14e7e2ca92bcbd54781fbab32bb7b49..e94f42abcef2b70f9f419c8fe306e02c
      device->FlashWindow = Wayland_FlashWindow;
  #ifdef SDL_USE_LIBDBUS
      device->ApplyWindowProgress = DBUS_ApplyWindowProgress;
+diff --git a/src/video/wayland/SDL_waylandwindow.c b/src/video/wayland/SDL_waylandwindow.c
+index 56b9fc4e5294f0a045b0c9dbd986dae77ab692f1..11877c97f3be55fbb620688f475295d140810465 100644
+--- a/src/video/wayland/SDL_waylandwindow.c
++++ b/src/video/wayland/SDL_waylandwindow.c
+@@ -31,6 +31,7 @@
+ #include "../SDL_egl_c.h"
+ #include "SDL_waylandevents_c.h"
+ #include "SDL_waylandmouse.h"
++#include "SDL_waylandshape.h"
+ #include "SDL_waylandwindow.h"
+ #include "SDL_waylandvideo.h"
+ #include "../../SDL_hints_c.h"
+@@ -426,6 +427,12 @@ static void ConfigureWindowGeometry(SDL_Window *window)
+ 
+         SetSurfaceOpaqueRegion(data, !(window->flags & SDL_WINDOW_TRANSPARENT) && window->opacity == 1.0f);
+ 
++        // The input region is in surface coordinates, and a scale change moves them without changing the window size, so the core would not reapply the shape.
++        SDL_Surface *shape = (SDL_Surface *)SDL_GetPointerProperty(SDL_GetWindowProperties(window), SDL_PROP_WINDOW_SHAPE_POINTER, NULL);
++        if (shape) {
++            Wayland_UpdateWindowShape(SDL_GetVideoDevice(), window, shape);
++        }
++
+         // Ensure that child popup windows are still in bounds.
+         for (SDL_Window *child = window->first_child; child; child = child->next_sibling) {
+             RepositionPopup(child, true);
 diff --git a/src/video/windows/SDL_windowsshape.c b/src/video/windows/SDL_windowsshape.c
 index 4e4d71f453cb3c3487ecc51d7dced976018c26ab..494a09c5a6cd7a519c106dda12886173d197a3e3 100644
 --- a/src/video/windows/SDL_windowsshape.c
