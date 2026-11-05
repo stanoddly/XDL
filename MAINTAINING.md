@@ -20,7 +20,7 @@ To add a step, commit it in `build/SDL` at its place in the series, with `git re
 
 ## Adding a patch
 
-Create `patches/NNNN-name/README.md` with five parts: what it does, why XDL needs it, which earlier patches it depends on, how to test it, and when to drop it. Then add commits with `name: ` subjects and export.
+Create `patches/NNNN-name/README.md` with a plain title, what the patch does and why, and a `## Testing` section. Add `## Depends on` or `## When to drop it` only when there is something real to say. Then add commits with `name: ` subjects and export.
 
 ## Moving to a new SDL release
 
