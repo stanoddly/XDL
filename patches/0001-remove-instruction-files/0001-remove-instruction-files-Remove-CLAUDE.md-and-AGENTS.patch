@@ -1,0 +1,46 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: botoddly <250804054+botoddly@users.noreply.github.com>
+Date: Thu, 5 Nov 2026 14:19:56 +0100
+Subject: [PATCH] remove-instruction-files: Remove CLAUDE.md and AGENTS.md
+
+---
+ AGENTS.md | 11 -----------
+ CLAUDE.md | 11 -----------
+ 2 files changed, 22 deletions(-)
+ delete mode 100644 AGENTS.md
+ delete mode 100644 CLAUDE.md
+
+diff --git a/AGENTS.md b/AGENTS.md
+deleted file mode 100644
+index f299237ae5dfde1e680d2c192f8865824572562b..0000000000000000000000000000000000000000
+--- a/AGENTS.md
++++ /dev/null
+@@ -1,11 +0,0 @@
+-Generative AI, including large language models (LLMs), should not be used in
+-any way when contributing to SDL.
+-
+-We want our code to be art. We want to interact with real humans. Please don't
+-submit AI-generated comments or code in bug reports or pull requests. We
+-understand some people consider AI to be a useful tool, but we want to connect
+-with you, not your computer.
+-
+-Any pull request to this project will ask you to confirm that you are the
+-author and that you are contributing your changes under the zlib license.
+-
+diff --git a/CLAUDE.md b/CLAUDE.md
+deleted file mode 100644
+index f299237ae5dfde1e680d2c192f8865824572562b..0000000000000000000000000000000000000000
+--- a/CLAUDE.md
++++ /dev/null
+@@ -1,11 +0,0 @@
+-Generative AI, including large language models (LLMs), should not be used in
+-any way when contributing to SDL.
+-
+-We want our code to be art. We want to interact with real humans. Please don't
+-submit AI-generated comments or code in bug reports or pull requests. We
+-understand some people consider AI to be a useful tool, but we want to connect
+-with you, not your computer.
+-
+-Any pull request to this project will ask you to confirm that you are the
+-author and that you are contributing your changes under the zlib license.
+-
