@@ -1,0 +1,77 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: botoddly <250804054+botoddly@users.noreply.github.com>
+Date: Thu, 5 Nov 2026 14:19:57 +0100
+Subject: [PATCH] library-name: Build the library as XDL3
+
+---
+ CMakeLists.txt              | 8 ++++----
+ cmake/sdlcommands.cmake     | 6 +++---
+ src/core/windows/version.rc | 2 +-
+ 3 files changed, 8 insertions(+), 8 deletions(-)
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index f7c15287b2e488aacf706412ad85d83af7651489..8ff836807771ee0a6fad1a60ce49c2823908d737 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -506,7 +506,7 @@ else()
+   add_library(SDL3::SDL3 ALIAS SDL3-static)
+ endif()
+ 
+-sdl_pc_link_options("-lSDL3")
++sdl_pc_link_options("-lXDL3")
+ 
+ # Enable large file support on 32-bit glibc, so that we can access files
+ # with large inode numbers
+@@ -3756,9 +3756,9 @@ sdl_sources(${SDL3_INCLUDE_FILES})
+ if((CMAKE_STATIC_LIBRARY_PREFIX STREQUAL "" AND CMAKE_STATIC_LIBRARY_SUFFIX STREQUAL ".lib") OR SDL_FRAMEWORK)
+   # - Avoid conflict between the dll import library and the static library
+   # - Create SDL3-static Apple Framework
+-  set(sdl_static_libname "SDL3-static")
++  set(sdl_static_libname "XDL3-static")
+ else()
+-  set(sdl_static_libname "SDL3")
++  set(sdl_static_libname "XDL3")
+ endif()
+ 
+ macro(check_add_debug_flag FLAG SUFFIX)
+@@ -3959,7 +3959,7 @@ endif()
+ 
+ if(SDL_SHARED)
+   set_target_properties(SDL3-shared PROPERTIES
+-    OUTPUT_NAME "SDL3"
++    OUTPUT_NAME "XDL3"
+     POSITION_INDEPENDENT_CODE TRUE
+     LINK_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/dynapi/SDL_dynapi.sym"
+     INTERFACE_LINK_DEPENDS "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/dynapi/SDL_dynapi.sym>"
+diff --git a/cmake/sdlcommands.cmake b/cmake/sdlcommands.cmake
+index 58889d19f3cfe645021a7fa7fd9067a0712deb6f..5bed5d4f530f50feee41e0b14d767eebd68b25c4 100644
+--- a/cmake/sdlcommands.cmake
++++ b/cmake/sdlcommands.cmake
+@@ -353,11 +353,11 @@ function(configure_sdl3_pc)
+   get_property(SDL_PC_LIBS TARGET SDL3-collector PROPERTY INTERFACE_SDL_PC_LINK_OPTIONS)
+   string(JOIN " " SDL_PC_LIBS ${SDL_PC_LIBS})
+ 
+-  string(REGEX REPLACE "-lSDL3( |$)" "-l${sdl_static_libname} " SDL_PC_STATIC_LIBS "${SDL_PC_STATIC_LIBS}")
++  string(REGEX REPLACE "-lXDL3( |$)" "-l${sdl_static_libname} " SDL_PC_STATIC_LIBS "${SDL_PC_STATIC_LIBS}")
+   if(NOT SDL_SHARED)
+-    string(REGEX REPLACE "-lSDL3( |$)" "-l${sdl_static_libname} " SDL_PC_LIBS "${SDL_PC_LIBS}")
++    string(REGEX REPLACE "-lXDL3( |$)" "-l${sdl_static_libname} " SDL_PC_LIBS "${SDL_PC_LIBS}")
+   endif()
+-  if(TARGET SDL3-shared AND TARGET SDL3-static AND NOT sdl_static_libname STREQUAL "SDL3")
++  if(TARGET SDL3-shared AND TARGET SDL3-static AND NOT sdl_static_libname STREQUAL "XDL3")
+     message(STATUS "\"pkg-config --static --libs sdl3\" will return invalid information")
+   endif()
+ 
+diff --git a/src/core/windows/version.rc b/src/core/windows/version.rc
+index 3af21cb1215f7ded139a5a585136ec182809d4fe..f6a494e91f76c7fae9c133f42d14ccca8f9811ee 100644
+--- a/src/core/windows/version.rc
++++ b/src/core/windows/version.rc
+@@ -26,7 +26,7 @@ BEGIN
+             VALUE "FileVersion", "3, 4, 20, 0\0"
+             VALUE "InternalName", "SDL\0"
+             VALUE "LegalCopyright", "Copyright (C) 2026 Sam Lantinga\0"
+-            VALUE "OriginalFilename", "SDL3.dll\0"
++            VALUE "OriginalFilename", "XDL3.dll\0"
+             VALUE "ProductName", "Simple DirectMedia Layer\0"
+             VALUE "ProductVersion", "3, 4, 20, 0\0"
+         END
