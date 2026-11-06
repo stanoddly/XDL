@@ -20,7 +20,7 @@ cmake -S build/SDL -B build/cmake -DCMAKE_BUILD_TYPE=Release
 cmake --build build/cmake --config Release
 ```
 
-The library is `XDL3`: `libXDL3.so.0`, `XDL3.dll` or `libXDL3.0.dylib`. The `SDL_` function names, `SDL3/` headers, `SDL3::` CMake targets and the `sdl3` pkg-config package stay the same, so code written for SDL builds against it. What XDL adds to the API is in `XDL/XDL.h`. Do not load XDL and a stock SDL in one process, because their symbols clash.
+The library is `XDL3`: `libXDL3.so.0`, `XDL3.dll` or `libXDL3.0.dylib`. The `SDL_` function names, `SDL3/` headers, `SDL3::` CMake targets and the `sdl3` pkg-config package stay the same, so code written for SDL builds against it. What XDL adds to the API is in `XDL/XDL.h`. On Emscripten, the SDL GPU API runs on WebGPU: see [the patch's README](patches/0007-webgpu-backend/README.md). Do not load XDL and a stock SDL in one process, because their symbols clash.
 
 ## Patches
 

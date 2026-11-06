@@ -38,6 +38,42 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
+  webgpu:
+    name: WebGPU
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      # tools/emsdk-env.sh uses the Emscripten of this workload.
+      - name: Install the .NET 11 preview SDK
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '11.0.x'
+          dotnet-quality: 'preview'
+
+      - name: Install the wasm-tools workload
+        run: dotnet workload install wasm-tools
+
+      - name: Install Chromium and a software Vulkan driver
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mesa-vulkan-drivers
+          mkdir -p build/node
+          (cd build/node && npm init -y > /dev/null && npm install playwright-core@1.63.0 --no-audit --no-fund)
+          build/node/node_modules/.bin/playwright-core install --with-deps chromium
+
+      - name: Build and run the smoke test
+        run: |
+          tools/apply.sh
+          source tools/emsdk-env.sh
+          emcmake cmake -S tests/webgpu -B build/webgpu-test -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/webgpu-test --parallel "$(nproc)"
+          tests/webgpu/run-test.sh
+
   build:
     name: ${{ matrix.rid }}
     runs-on: ${{ matrix.os }}

@@ -1,0 +1,20 @@
+cmake_minimum_required(VERSION 3.24)
+project(xdl_webgpu_test LANGUAGES C)
+
+if(NOT EMSCRIPTEN)
+    message(FATAL_ERROR "The WebGPU test targets wasm32-emscripten only; configure with emcmake")
+endif()
+
+set(SDL_SHARED OFF CACHE BOOL "" FORCE)
+set(SDL_STATIC ON CACHE BOOL "" FORCE)
+set(SDL_TEST_LIBRARY OFF CACHE BOOL "" FORCE)
+set(SDL_TESTS OFF CACHE BOOL "" FORCE)
+set(SDL_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(SDL_INSTALL OFF CACHE BOOL "" FORCE)
+add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../build/SDL" SDL EXCLUDE_FROM_ALL)
+
+add_executable(xdl_webgpu_test test.c)
+set_target_properties(xdl_webgpu_test PROPERTIES OUTPUT_NAME test SUFFIX .html)
+target_link_libraries(xdl_webgpu_test PRIVATE SDL3::SDL3-static)
+target_link_options(xdl_webgpu_test PRIVATE -sASYNCIFY -sALLOW_MEMORY_GROWTH --shell-file ${CMAKE_CURRENT_SOURCE_DIR}/shell.html)
+set_property(TARGET xdl_webgpu_test APPEND PROPERTY LINK_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shell.html)
