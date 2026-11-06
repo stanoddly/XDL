@@ -1,0 +1,103 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: botoddly <250804054+botoddly@users.noreply.github.com>
+Date: Fri, 6 Nov 2026 12:46:37 +0100
+Subject: [PATCH] webgpu-backend: Register the driver and add its API to XDL.h
+
+---
+ include/XDL/XDL.h    | 37 +++++++++++++++++++++++++++++++++++++
+ src/gpu/SDL_gpu.c    |  7 +++++++
+ src/gpu/SDL_sysgpu.h |  1 +
+ 3 files changed, 45 insertions(+)
+
+diff --git a/include/XDL/XDL.h b/include/XDL/XDL.h
+index af7afa4ab1a01b0b35fcb0966960fb60d493eca7..63a0f4ccb6675b464e1be7ccafa76a3ca0923634 100644
+--- a/include/XDL/XDL.h
++++ b/include/XDL/XDL.h
+@@ -82,6 +82,43 @@ extern "C" {
+  */
+ extern SDL_DECLSPEC bool SDLCALL XDL_SetWindowMousePassthroughEvents(SDL_Window *window, bool enabled);
+ 
++/**
++ * WGSL shader source, for the WebGPU GPU driver on Emscripten.
++ *
++ * Pass this to SDL_CreateGPUDevice() and in SDL_GPUShaderCreateInfo.format.
++ *
++ * \since This macro is available since XDL 3.4.20-1.
++ */
++#define XDL_GPU_SHADERFORMAT_WGSL (1u << 6)
++
++/**
++ * The property for SDL_CreateGPUDeviceWithProperties() that says the app can
++ * provide WGSL shaders.
++ *
++ * \since This macro is available since XDL 3.4.20-1.
++ */
++#define XDL_PROP_GPU_DEVICE_CREATE_SHADERS_WGSL_BOOLEAN "XDL.gpu.device.create.shaders.wgsl"
++
++/**
++ * The properties for SDL_CreateGPUDeviceWithProperties() that adopt an existing
++ * WGPUInstance, WGPUAdapter and WGPUDevice instead of requesting them, which
++ * skips the blocking request loops. Set all three.
++ *
++ * \since These macros are available since XDL 3.4.20-1.
++ */
++#define XDL_PROP_GPU_DEVICE_CREATE_WEBGPU_INSTANCE_POINTER "XDL.gpu.device.create.webgpu.instance"
++#define XDL_PROP_GPU_DEVICE_CREATE_WEBGPU_ADAPTER_POINTER  "XDL.gpu.device.create.webgpu.adapter"
++#define XDL_PROP_GPU_DEVICE_CREATE_WEBGPU_DEVICE_POINTER   "XDL.gpu.device.create.webgpu.device"
++
++/**
++ * The property for SDL_CreateGPUDeviceWithProperties() that sets the number of
++ * submits after which an unused cached bind group is freed. 0 disables caching,
++ * and -1 disables pruning.
++ *
++ * \since This macro is available since XDL 3.4.20-1.
++ */
++#define XDL_PROP_GPU_DEVICE_CREATE_WEBGPU_BINDGROUP_EXPIRE_AFTER_N_SUBMITS "XDL.gpu.device.create.webgpu.bindgroupexpiry"
++
+ #ifdef __cplusplus
+ }
+ #endif
+diff --git a/src/gpu/SDL_gpu.c b/src/gpu/SDL_gpu.c
+index b42740917c37b447017dbdd4e7856e8e42b28b31..0f5d3f12e027f2e6b9e55d44c5d8ed495d83774a 100644
+--- a/src/gpu/SDL_gpu.c
++++ b/src/gpu/SDL_gpu.c
+@@ -20,6 +20,7 @@
+ */
+ #include "SDL_internal.h"
+ #include "SDL_sysgpu.h"
++#include <XDL/XDL.h>
+ 
+ // FIXME: This could probably use SDL_ObjectValid
+ #define CHECK_DEVICE_MAGIC(device, retval)  \
+@@ -323,6 +324,9 @@ static const SDL_GPUBootstrap *backends[] = {
+ #endif
+ #ifdef SDL_GPU_VULKAN
+     &VulkanDriver,
++#endif
++#ifdef SDL_GPU_WEBGPU
++    &WebGPUDriver,
+ #endif
+     NULL
+ };
+@@ -660,6 +664,9 @@ static void SDL_GPU_FillProperties(
+     if (format_flags & SDL_GPU_SHADERFORMAT_METALLIB) {
+         SDL_SetBooleanProperty(props, SDL_PROP_GPU_DEVICE_CREATE_SHADERS_METALLIB_BOOLEAN, true);
+     }
++    if (format_flags & XDL_GPU_SHADERFORMAT_WGSL) {
++        SDL_SetBooleanProperty(props, XDL_PROP_GPU_DEVICE_CREATE_SHADERS_WGSL_BOOLEAN, true);
++    }
+     SDL_SetBooleanProperty(props, SDL_PROP_GPU_DEVICE_CREATE_DEBUGMODE_BOOLEAN, debug_mode);
+     SDL_SetStringProperty(props, SDL_PROP_GPU_DEVICE_CREATE_NAME_STRING, name);
+ }
+diff --git a/src/gpu/SDL_sysgpu.h b/src/gpu/SDL_sysgpu.h
+index e77d4a8c578f9552a64b297d7e420f564f4d7ec3..6c956263b54ca5dee83bcda0c02f19a7f1ee21e3 100644
+--- a/src/gpu/SDL_sysgpu.h
++++ b/src/gpu/SDL_sysgpu.h
+@@ -1205,6 +1205,7 @@ extern SDL_GPUBootstrap VulkanDriver;
+ extern SDL_GPUBootstrap D3D12Driver;
+ extern SDL_GPUBootstrap MetalDriver;
+ extern SDL_GPUBootstrap PrivateGPUDriver;
++extern SDL_GPUBootstrap WebGPUDriver;
+ 
+ #ifdef __cplusplus
+ }
