@@ -5,11 +5,11 @@ Subject: [PATCH] vulkan-defer-defrag: Defer defrag while another command
  buffer is open
 
 ---
- src/gpu/vulkan/SDL_gpu_vulkan.c | 20 ++++++++++++++++++++
- 1 file changed, 20 insertions(+)
+ src/gpu/vulkan/SDL_gpu_vulkan.c | 23 +++++++++++++++++++++++
+ 1 file changed, 23 insertions(+)
 
 diff --git a/src/gpu/vulkan/SDL_gpu_vulkan.c b/src/gpu/vulkan/SDL_gpu_vulkan.c
-index a7d8d57d7d3c3a7f6bcfa47ffc51d436b65e30ac..f3515da19321fd16fdea0f7b3793768116fa1c0e 100644
+index a7d8d57d7d3c3a7f6bcfa47ffc51d436b65e30ac..487832f7245ef13b9a5acf080af07b664f8155e3 100644
 --- a/src/gpu/vulkan/SDL_gpu_vulkan.c
 +++ b/src/gpu/vulkan/SDL_gpu_vulkan.c
 @@ -1219,6 +1219,8 @@ struct VulkanRenderer
@@ -21,16 +21,19 @@ index a7d8d57d7d3c3a7f6bcfa47ffc51d436b65e30ac..f3515da19321fd16fdea0f7b37937681
  
      VulkanMemoryAllocation **allocationsToDefrag;
      Uint32 allocationsToDefragCount;
-@@ -9656,6 +9658,8 @@ static SDL_GPUCommandBuffer *VULKAN_AcquireCommandBuffer(
-     DescriptorSetCache *descriptorSetCache =
-         VULKAN_INTERNAL_AcquireDescriptorSetCache(renderer);
+@@ -9740,6 +9742,11 @@ static SDL_GPUCommandBuffer *VULKAN_AcquireCommandBuffer(
+         return NULL;
+     }
  
++    // Counted last, so that a failed acquire leaves the count alone. Nothing is recorded before this.
++    SDL_LockMutex(renderer->acquireCommandBufferLock);
 +    renderer->openCommandBufferCount += 1;
++    SDL_UnlockMutex(renderer->acquireCommandBufferLock);
 +
-     SDL_UnlockMutex(renderer->acquireCommandBufferLock);
+     return (SDL_GPUCommandBuffer *)commandBuffer;
+ }
  
-     commandBuffer->descriptorSetCache = descriptorSetCache;
-@@ -10814,7 +10818,15 @@ static bool VULKAN_Submit(
+@@ -10814,7 +10821,15 @@ static bool VULKAN_Submit(
              swapchainTextureSubresource);
      }
  
@@ -46,7 +49,7 @@ index a7d8d57d7d3c3a7f6bcfa47ffc51d436b65e30ac..f3515da19321fd16fdea0f7b37937681
          renderer->allocationsToDefragCount > 0 &&
          !renderer->defragInProgress) {
          if (!VULKAN_INTERNAL_DefragmentMemory(renderer, vulkanCommandBuffer))
-@@ -10823,6 +10835,10 @@ static bool VULKAN_Submit(
+@@ -10823,6 +10838,10 @@ static bool VULKAN_Submit(
          }
      }
  
@@ -57,7 +60,7 @@ index a7d8d57d7d3c3a7f6bcfa47ffc51d436b65e30ac..f3515da19321fd16fdea0f7b37937681
      if (!VULKAN_INTERNAL_EndCommandBuffer(renderer, vulkanCommandBuffer)) {
          SDL_UnlockMutex(renderer->submitLock);
          return false;
-@@ -10965,6 +10981,10 @@ static bool VULKAN_Cancel(
+@@ -10965,6 +10984,10 @@ static bool VULKAN_Cancel(
      vulkanCommandBuffer = (VulkanCommandBuffer *)commandBuffer;
      renderer = vulkanCommandBuffer->renderer;
  
