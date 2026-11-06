@@ -1,0 +1,35 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: botoddly <250804054+botoddly@users.noreply.github.com>
+Date: Fri, 6 Nov 2026 21:35:36 +0100
+Subject: [PATCH] vulkan-defer-defrag: Hold the dispose lock during defrag
+
+---
+ src/gpu/vulkan/SDL_gpu_vulkan.c | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/src/gpu/vulkan/SDL_gpu_vulkan.c b/src/gpu/vulkan/SDL_gpu_vulkan.c
+index f3515da19321fd16fdea0f7b3793768116fa1c0e..23bf129f4c9b6f96fa6619d659cea103c411f780 100644
+--- a/src/gpu/vulkan/SDL_gpu_vulkan.c
++++ b/src/gpu/vulkan/SDL_gpu_vulkan.c
+@@ -10821,9 +10821,11 @@ static bool VULKAN_Submit(
+     /* Defrag leaves each moved texture's old image in a copy layout and moves
+      * its bindings, so another open command buffer may still sample that image.
+      * The lock stays held so that no command buffer is acquired until the
+-     * containers point at the new resources.
++     * containers point at the new resources. The dispose lock stays held because
++     * releasing a texture or buffer frees the container that defrag reads.
+      */
+     SDL_LockMutex(renderer->acquireCommandBufferLock);
++    SDL_LockMutex(renderer->disposeLock);
+ 
+     if (performCleanups &&
+         renderer->openCommandBufferCount == 1 &&
+@@ -10835,6 +10837,8 @@ static bool VULKAN_Submit(
+         }
+     }
+ 
++    SDL_UnlockMutex(renderer->disposeLock);
++
+     renderer->openCommandBufferCount -= 1;
+ 
+     SDL_UnlockMutex(renderer->acquireCommandBufferLock);
