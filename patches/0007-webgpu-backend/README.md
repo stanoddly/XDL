@@ -5,6 +5,7 @@ Adds a WebGPU driver for the SDL GPU API on Emscripten, because stock SDL has no
 The driver name is `webgpu`, and `SDL_HINT_GPU_DRIVER` works as usual. Shaders are WGSL:
 
 ```c
+#include <SDL3/SDL.h>
 #include <XDL/XDL.h>
 
 SDL_GPUDevice *device = SDL_CreateGPUDevice(XDL_GPU_SHADERFORMAT_WGSL, debug, NULL);
@@ -21,7 +22,7 @@ WebGPU is asynchronous. The adapter and device requests, `SDL_WaitForGPUFences`,
 
 An app that cannot use them, such as one on the .NET browser runtime, must not block:
 
-1. Get the `WGPUInstance`, `WGPUAdapter` and `WGPUDevice` itself, asynchronously, and pass all three to `SDL_CreateGPUDeviceWithProperties()` with the `XDL_PROP_GPU_DEVICE_CREATE_WEBGPU_*` properties and `XDL_PROP_GPU_DEVICE_CREATE_SHADERS_WGSL_BOOLEAN`.
+1. Get the `WGPUInstance`, `WGPUAdapter` and `WGPUDevice` itself, asynchronously, and pass all three to `SDL_CreateGPUDeviceWithProperties()` with the `XDL_PROP_GPU_DEVICE_CREATE_WEBGPU_*` properties and `XDL_PROP_GPU_DEVICE_CREATE_SHADERS_WGSL_BOOLEAN`. The device must have the `depth-clip-control` and `indirect-first-instance` features, unless `SDL_PROP_GPU_DEVICE_CREATE_FEATURE_DEPTH_CLAMPING_BOOLEAN` and `SDL_PROP_GPU_DEVICE_CREATE_FEATURE_INDIRECT_DRAW_FIRST_INSTANCE_BOOLEAN` are false. Otherwise creating the SDL device fails.
 2. Per frame, use only `SDL_AcquireGPUSwapchainTexture()` and `SDL_QueryGPUFence()`.
 
 ## Linking
