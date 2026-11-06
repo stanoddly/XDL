@@ -1,0 +1,26 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: botoddly <250804054+botoddly@users.noreply.github.com>
+Date: Fri, 6 Nov 2026 12:51:09 +0100
+Subject: [PATCH] webgpu-backend: Read multisample storage textures through
+ their texture binding
+
+---
+ src/gpu/webgpu/SDL_gpu_webgpu.c | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/src/gpu/webgpu/SDL_gpu_webgpu.c b/src/gpu/webgpu/SDL_gpu_webgpu.c
+index 2242bc09dfac6669f0c7266985740281d67e0a8b..7915971d1555e49f16506859826eb14f563b6992 100644
+--- a/src/gpu/webgpu/SDL_gpu_webgpu.c
++++ b/src/gpu/webgpu/SDL_gpu_webgpu.c
+@@ -3464,6 +3464,11 @@ static WebGPUTexture *WEBGPU_INTERNAL_CreateTexture(WebGPURenderer *renderer, co
+         desc.usage |= WGPUTextureUsage_TextureBinding;
+     }
+ 
++    // WebGPU forbids storage bindings on multisampled textures. Shaders read them as texture_multisampled_2d through the texture binding.
++    if (createInfo->sample_count > SDL_GPU_SAMPLECOUNT_1) {
++        desc.usage &= ~WGPUTextureUsage_StorageBinding;
++    }
++
+     desc.usage |= WGPUTextureUsage_CopyDst;
+     desc.usage |= WGPUTextureUsage_CopySrc;
+ 

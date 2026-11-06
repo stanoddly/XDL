@@ -1,0 +1,52 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: botoddly <250804054+botoddly@users.noreply.github.com>
+Date: Fri, 6 Nov 2026 12:46:37 +0100
+Subject: [PATCH] webgpu-backend: Build on Emscripten
+
+---
+ CMakeLists.txt                                | 19 ++++++++++++++++++-
+ include/build_config/SDL_build_config.h.cmake |  1 +
+ 2 files changed, 19 insertions(+), 1 deletion(-)
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index bc2f97f26eca8b00bf2477980f6fc8ca7a7034fb..f8d46a38dca6f588a00e41b4ca11c09abb8203f1 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -3575,7 +3575,24 @@ if(SDL_GPU)
+     set(SDL_GPU_METAL 1)
+     set(HAVE_SDL_GPU TRUE)
+   endif()
+-  if(SDL_RENDER_GPU AND HAVE_SDL_GPU)
++  if(EMSCRIPTEN)
++    sdl_glob_sources(
++      "${SDL3_SOURCE_DIR}/src/gpu/webgpu/*.c"
++    )
++    set_source_files_properties(
++      "${SDL3_SOURCE_DIR}/src/gpu/webgpu/SDL_gpu_webgpu.c"
++      "${SDL3_SOURCE_DIR}/src/gpu/webgpu/XDL_wgpu_surface.c"
++      PROPERTIES COMPILE_OPTIONS "--use-port=emdawnwebgpu" SKIP_PRECOMPILE_HEADERS TRUE
++    )
++    if(TARGET SDL3-static)
++      target_link_options(SDL3-static INTERFACE "--use-port=emdawnwebgpu")
++    endif()
++    sdl_pc_link_options("--use-port=emdawnwebgpu")
++    set(SDL_GPU_WEBGPU 1)
++    set(HAVE_SDL_GPU TRUE)
++  endif()
++  # The WebGPU backend has no renderer shaders, and without asyncify creating its device for the render driver can hang instead of falling back.
++  if(SDL_RENDER_GPU AND HAVE_SDL_GPU AND NOT EMSCRIPTEN)
+     set(SDL_VIDEO_RENDER_GPU 1)
+     set(HAVE_RENDER_GPU TRUE)
+   endif()
+diff --git a/include/build_config/SDL_build_config.h.cmake b/include/build_config/SDL_build_config.h.cmake
+index d7bb97bb85552c6b91f8de355c935ef881a6ed6b..a1d0c73ae1253ffe2d4d8bdeb0431440c577c58b 100644
+--- a/include/build_config/SDL_build_config.h.cmake
++++ b/include/build_config/SDL_build_config.h.cmake
+@@ -490,6 +490,7 @@
+ #cmakedefine SDL_GPU_D3D12 1
+ #cmakedefine SDL_GPU_VULKAN 1
+ #cmakedefine SDL_GPU_METAL 1
++#cmakedefine SDL_GPU_WEBGPU 1
+ 
+ #cmakedefine SDL_GPU_PRIVATE 1
+ 
