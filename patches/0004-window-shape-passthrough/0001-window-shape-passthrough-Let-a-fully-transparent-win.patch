@@ -1,0 +1,269 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: botoddly <250804054+botoddly@users.noreply.github.com>
+Date: Thu, 5 Nov 2026 15:29:01 +0100
+Subject: [PATCH] window-shape-passthrough: Let a fully transparent window
+ shape pass input through on Wayland and Windows
+
+---
+ src/video/wayland/SDL_waylandshape.c  | 91 +++++++++++++++++++++++++++
+ src/video/wayland/SDL_waylandshape.h  | 28 +++++++++
+ src/video/wayland/SDL_waylandvideo.c  |  2 +
+ src/video/wayland/SDL_waylandwindow.c |  7 +++
+ src/video/windows/SDL_windowsshape.c  | 61 ++++++++++++++++++
+ 5 files changed, 189 insertions(+)
+ create mode 100644 src/video/wayland/SDL_waylandshape.c
+ create mode 100644 src/video/wayland/SDL_waylandshape.h
+
+diff --git a/src/video/wayland/SDL_waylandshape.c b/src/video/wayland/SDL_waylandshape.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..c5cc01ee8c3ce70de69f1814fdf890ea66efbefe
+--- /dev/null
++++ b/src/video/wayland/SDL_waylandshape.c
+@@ -0,0 +1,91 @@
++/*
++  Simple DirectMedia Layer
++  Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
++
++  This software is provided 'as-is', without any express or implied
++  warranty.  In no event will the authors be held liable for any damages
++  arising from the use of this software.
++
++  Permission is granted to anyone to use this software for any purpose,
++  including commercial applications, and to alter it and redistribute it
++  freely, subject to the following restrictions:
++
++  1. The origin of this software must not be misrepresented; you must not
++     claim that you wrote the original software. If you use this software
++     in a product, an acknowledgment in the product documentation would be
++     appreciated but is not required.
++  2. Altered source versions must be plainly marked as such, and must not be
++     misrepresented as being the original software.
++  3. This notice may not be removed or altered from any source distribution.
++*/
++#include "SDL_internal.h"
++
++#ifdef SDL_VIDEO_DRIVER_WAYLAND
++
++#include "SDL_waylandvideo.h"
++#include "SDL_waylandwindow.h"
++#include "SDL_waylandshape.h"
++
++// Wayland has no window shapes, so the shape becomes the surface's input region, as X11 sets only the input shape.
++// The opaque spans of each row receive input; the rest passes through to whatever is beneath the window.
++bool Wayland_UpdateWindowShape(SDL_VideoDevice *_this, SDL_Window *window, SDL_Surface *shape)
++{
++    SDL_VideoData *video = _this->internal;
++    SDL_WindowData *data = window->internal;
++    SDL_Surface *stretched = NULL;
++    struct wl_region *region;
++    int x, y;
++
++    if (!data->surface) {
++        return SDL_SetError("Window has no surface");
++    }
++
++    if (!shape) {
++        // A null region restores the default, the whole surface.
++        wl_surface_set_input_region(data->surface, NULL);
++        return true;
++    }
++
++    // A region is in surface coordinates, which differ from window coordinates when scaling to the display or emulating a fullscreen mode.
++    if (shape->w != data->current.logical_width || shape->h != data->current.logical_height) {
++        stretched = SDL_CreateSurface(data->current.logical_width, data->current.logical_height, SDL_PIXELFORMAT_ARGB32);
++        if (!stretched) {
++            return false;
++        }
++        if (!SDL_StretchSurface(shape, NULL, stretched, NULL, SDL_SCALEMODE_LINEAR)) {
++            SDL_DestroySurface(stretched);
++            return false;
++        }
++        shape = stretched;
++    }
++
++    region = wl_compositor_create_region(video->compositor);
++    for (y = 0; y < shape->h; y++) {
++        // SDL_PIXELFORMAT_ARGB32 stores alpha in the first byte of each pixel.
++        const Uint8 *a = (const Uint8 *)shape->pixels + y * shape->pitch;
++        int span_start = -1;
++        for (x = 0; x < shape->w; x++) {
++            if (*a != SDL_ALPHA_TRANSPARENT) {
++                if (span_start == -1) {
++                    span_start = x;
++                }
++            } else if (span_start != -1) {
++                wl_region_add(region, span_start, y, x - span_start, 1);
++                span_start = -1;
++            }
++            a += 4;
++        }
++        if (span_start != -1) {
++            wl_region_add(region, span_start, y, x - span_start, 1);
++        }
++    }
++    wl_surface_set_input_region(data->surface, region);
++    wl_region_destroy(region);
++
++    if (stretched) {
++        SDL_DestroySurface(stretched);
++    }
++    return true;
++}
++
++#endif // SDL_VIDEO_DRIVER_WAYLAND
+diff --git a/src/video/wayland/SDL_waylandshape.h b/src/video/wayland/SDL_waylandshape.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..27a83a88e7e22b152c995eaec6acecfedb5cff69
+--- /dev/null
++++ b/src/video/wayland/SDL_waylandshape.h
+@@ -0,0 +1,28 @@
++/*
++  Simple DirectMedia Layer
++  Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
++
++  This software is provided 'as-is', without any express or implied
++  warranty.  In no event will the authors be held liable for any damages
++  arising from the use of this software.
++
++  Permission is granted to anyone to use this software for any purpose,
++  including commercial applications, and to alter it and redistribute it
++  freely, subject to the following restrictions:
++
++  1. The origin of this software must not be misrepresented; you must not
++     claim that you wrote the original software. If you use this software
++     in a product, an acknowledgment in the product documentation would be
++     appreciated but is not required.
++  2. Altered source versions must be plainly marked as such, and must not be
++     misrepresented as being the original software.
++  3. This notice may not be removed or altered from any source distribution.
++*/
++#include "SDL_internal.h"
++
++#ifndef SDL_waylandshape_h_
++#define SDL_waylandshape_h_
++
++extern bool Wayland_UpdateWindowShape(SDL_VideoDevice *_this, SDL_Window *window, SDL_Surface *shape);
++
++#endif // SDL_waylandshape_h_
+diff --git a/src/video/wayland/SDL_waylandvideo.c b/src/video/wayland/SDL_waylandvideo.c
+index 2f31581cf14e7e2ca92bcbd54781fbab32bb7b49..e94f42abcef2b70f9f419c8fe306e02c555b8dc8 100644
+--- a/src/video/wayland/SDL_waylandvideo.c
++++ b/src/video/wayland/SDL_waylandvideo.c
+@@ -38,6 +38,7 @@
+ #include "SDL_waylandvideo.h"
+ #include "SDL_waylandvulkan.h"
+ #include "SDL_waylandwindow.h"
++#include "SDL_waylandshape.h"
+ 
+ #include <fcntl.h>
+ #include <sys/types.h>
+@@ -674,6 +675,7 @@ static SDL_VideoDevice *Wayland_CreateDevice(bool require_preferred_protocols)
+     device->GetDisplayForWindow = Wayland_GetDisplayForWindow;
+     device->DestroyWindow = Wayland_DestroyWindow;
+     device->SetWindowHitTest = Wayland_SetWindowHitTest;
++    device->UpdateWindowShape = Wayland_UpdateWindowShape;
+     device->FlashWindow = Wayland_FlashWindow;
+ #ifdef SDL_USE_LIBDBUS
+     device->ApplyWindowProgress = DBUS_ApplyWindowProgress;
+diff --git a/src/video/wayland/SDL_waylandwindow.c b/src/video/wayland/SDL_waylandwindow.c
+index 56b9fc4e5294f0a045b0c9dbd986dae77ab692f1..11877c97f3be55fbb620688f475295d140810465 100644
+--- a/src/video/wayland/SDL_waylandwindow.c
++++ b/src/video/wayland/SDL_waylandwindow.c
+@@ -31,6 +31,7 @@
+ #include "../SDL_egl_c.h"
+ #include "SDL_waylandevents_c.h"
+ #include "SDL_waylandmouse.h"
++#include "SDL_waylandshape.h"
+ #include "SDL_waylandwindow.h"
+ #include "SDL_waylandvideo.h"
+ #include "../../SDL_hints_c.h"
+@@ -426,6 +427,12 @@ static void ConfigureWindowGeometry(SDL_Window *window)
+ 
+         SetSurfaceOpaqueRegion(data, !(window->flags & SDL_WINDOW_TRANSPARENT) && window->opacity == 1.0f);
+ 
++        // The input region is in surface coordinates, and a scale change moves them without changing the window size, so the core would not reapply the shape.
++        SDL_Surface *shape = (SDL_Surface *)SDL_GetPointerProperty(SDL_GetWindowProperties(window), SDL_PROP_WINDOW_SHAPE_POINTER, NULL);
++        if (shape) {
++            Wayland_UpdateWindowShape(SDL_GetVideoDevice(), window, shape);
++        }
++
+         // Ensure that child popup windows are still in bounds.
+         for (SDL_Window *child = window->first_child; child; child = child->next_sibling) {
+             RepositionPopup(child, true);
+diff --git a/src/video/windows/SDL_windowsshape.c b/src/video/windows/SDL_windowsshape.c
+index 4e4d71f453cb3c3487ecc51d7dced976018c26ab..494a09c5a6cd7a519c106dda12886173d197a3e3 100644
+--- a/src/video/windows/SDL_windowsshape.c
++++ b/src/video/windows/SDL_windowsshape.c
+@@ -67,11 +67,72 @@ static HRGN GenerateSpanListRegion(SDL_Surface *shape, int offset_x, int offset_
+     return mask;
+ }
+ 
++static bool HasOpaquePixel(SDL_Surface *shape)
++{
++    int x, y;
++
++    for (y = 0; y < shape->h; y++) {
++        // SDL_PIXELFORMAT_ARGB32 stores alpha in the first byte of each pixel.
++        const Uint8 *a = (const Uint8 *)shape->pixels + y * shape->pitch;
++        for (x = 0; x < shape->w; x++) {
++            if (*a != SDL_ALPHA_TRANSPARENT) {
++                return true;
++            }
++            a += 4;
++        }
++    }
++    return false;
++}
++
++/* A region clips what a window draws as well as its input, so an empty one would hide a transparent window.
++   A transparent window whose shape has no opaque pixel stays visible and lets all input through instead. */
++static bool SetInputTransparent(SDL_Window *window, bool transparent)
++{
++    SDL_WindowData *data = window->internal;
++    LONG_PTR style = GetWindowLongPtr(data->hwnd, GWL_EXSTYLE);
++    LONG_PTR updated = style;
++
++    if (transparent) {
++        updated |= WS_EX_LAYERED | WS_EX_TRANSPARENT;
++    } else {
++        updated &= ~WS_EX_TRANSPARENT;
++        // SDL_SetWindowOpacity owns WS_EX_LAYERED below full opacity.
++        if (window->opacity == 1.0f) {
++            updated &= ~WS_EX_LAYERED;
++        }
++    }
++
++    if (updated != style) {
++        // SetWindowLongPtr returns the previous style, so only the last error tells a failure from a previous 0.
++        SetLastError(0);
++        if (SetWindowLongPtr(data->hwnd, GWL_EXSTYLE, updated) == 0 && GetLastError() != 0) {
++            return WIN_SetError("SetWindowLongPtr()");
++        }
++    }
++    if (transparent && SetLayeredWindowAttributes(data->hwnd, 0, (BYTE)(window->opacity * 255.0f), LWA_ALPHA) == 0) {
++        return WIN_SetError("SetLayeredWindowAttributes()");
++    }
++    return true;
++}
++
+ bool WIN_UpdateWindowShape(SDL_VideoDevice *_this, SDL_Window *window, SDL_Surface *shape)
+ {
+     SDL_WindowData *data = window->internal;
+     HRGN mask = NULL;
+ 
++    if (window->flags & SDL_WINDOW_TRANSPARENT) {
++        bool passthrough = shape && !HasOpaquePixel(shape);
++        if (!SetInputTransparent(window, passthrough)) {
++            return false;
++        }
++        if (passthrough) {
++            if (!SetWindowRgn(data->hwnd, NULL, TRUE)) {
++                return WIN_SetError("SetWindowRgn failed");
++            }
++            return true;
++        }
++    }
++
+     // Generate a set of spans for the region
+     if (shape) {
+         SDL_Surface *stretched = NULL;

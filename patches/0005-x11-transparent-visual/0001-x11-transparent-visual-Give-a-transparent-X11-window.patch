@@ -1,0 +1,30 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: botoddly <250804054+botoddly@users.noreply.github.com>
+Date: Thu, 5 Nov 2026 15:29:01 +0100
+Subject: [PATCH] x11-transparent-visual: Give a transparent X11 window that is
+ not OpenGL a 32-bit visual
+
+---
+ src/video/x11/SDL_x11window.c | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/src/video/x11/SDL_x11window.c b/src/video/x11/SDL_x11window.c
+index 64dff5e93af3d4d63f95ab5043d55de80e2a75be..367f70b12f964fe27064f91cea89ba88ad6b6c92 100644
+--- a/src/video/x11/SDL_x11window.c
++++ b/src/video/x11/SDL_x11window.c
+@@ -648,6 +648,15 @@ bool X11_CreateWindow(SDL_VideoDevice *_this, SDL_Window *window, SDL_Properties
+     {
+         visual = displaydata->visual;
+         depth = displaydata->depth;
++
++        // A transparent window that is not OpenGL, e.g. one for Vulkan, needs a visual with alpha, so the compositor blends it with what is beneath.
++        if (window->flags & SDL_WINDOW_TRANSPARENT) {
++            XVisualInfo vinfo;
++            if (X11_XMatchVisualInfo(display, screen, 32, TrueColor, &vinfo)) {
++                visual = vinfo.visual;
++                depth = vinfo.depth;
++            }
++        }
+     }
+ 
+     xattr.override_redirect = ((window->flags & SDL_WINDOW_TOOLTIP) || (window->flags & SDL_WINDOW_POPUP_MENU) || force_override_redirect) ? True : False;

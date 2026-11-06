@@ -22,13 +22,18 @@ To add a step, commit it in `build/SDL` at its place in the series, with `git re
 
 Create `patches/NNNN-name/README.md` with a plain title, what the patch does and why, and a `## Testing` section. Add `## Depends on` or `## When to drop it` only when there is something real to say. Then add commits with `name: ` subjects and export.
 
+## Adding to the public API
+
+Declare it in `include/XDL/XDL.h` with an `XDL_` prefix, and append it to `SDL_dynapi_procs.h`, `SDL_dynapi_overrides.h` and `SDL_dynapi.sym`. If it changes XDL's dynamic API table in an incompatible way, increase the counter in `SDL_DYNAPI_VERSION`.
+
 ## Moving to a new SDL release
 
 1. Move the submodule, with full history: `git -C external/SDL fetch --tags origin`, `git -C external/SDL checkout <new-tag>`, `git add external/SDL`.
 2. Review `git diff <old-tag> <new-tag>` for the paths the patches touch. A new file can apply and compile while SDL changes behavior around it.
 3. Run `tools/apply.sh`. At a conflict, read the patch's README, resolve it in `build/SDL`, and run `git am --continue`. To start over, run `git am --abort` there, then `tools/apply.sh`.
-4. Run `tools/export.sh`, then update any README that changed.
-5. Update `XDL_VERSION` in `.github/workflows/build.yml`.
+4. If the release adds functions to `SDL_dynapi_procs.h`, keep XDL's lines last and increase the counter in `SDL_DYNAPI_VERSION`. XDL's slots move, so an older XDL app would otherwise call the wrong function through `SDL3_DYNAMIC_API`.
+5. Run `tools/export.sh`, then update any README that changed.
+6. Update `XDL_VERSION` in `.github/workflows/build.yml`.
 
 ## Marking a build
 

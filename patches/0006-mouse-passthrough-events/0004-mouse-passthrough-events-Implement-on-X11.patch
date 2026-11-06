@@ -1,0 +1,304 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: botoddly <250804054+botoddly@users.noreply.github.com>
+Date: Thu, 5 Nov 2026 15:32:04 +0100
+Subject: [PATCH] mouse-passthrough-events: Implement on X11
+
+---
+ src/video/x11/SDL_x11events.c  |  25 +++++-
+ src/video/x11/SDL_x11video.c   |   1 +
+ src/video/x11/SDL_x11video.h   |   6 ++
+ src/video/x11/SDL_x11window.h  |   2 +
+ src/video/x11/SDL_x11xinput2.c | 137 +++++++++++++++++++++++++++++++++
+ src/video/x11/SDL_x11xinput2.h |   2 +
+ 6 files changed, 169 insertions(+), 4 deletions(-)
+
+diff --git a/src/video/x11/SDL_x11events.c b/src/video/x11/SDL_x11events.c
+index 0ae613a8774dfdfd252f1610e0ef3633d04f7e8d..3109d74b91c02f94755c9113e53023f7468f036d 100644
+--- a/src/video/x11/SDL_x11events.c
++++ b/src/video/x11/SDL_x11events.c
+@@ -1509,10 +1509,17 @@ static void X11_DispatchEvent(SDL_VideoDevice *_this, XEvent *xevent)
+             SDL_Log("Mode: NotifyUngrab");
+         }
+ #endif
+-        SDL_SetMouseFocus(data->window);
++        // Also on ungrab: from then on, the window receives the input under the pointer.
++        data->pointer_over_input_shape = true;
+ 
+-        mouse->last_x = xevent->xcrossing.x;
+-        mouse->last_y = xevent->xcrossing.y;
++        /* Mouse passthrough events keep the focus while the pointer crosses into the window's input shape. The motion below must then
++           move the pointer, so the last position is the one they reported. */
++        if (mouse->focus != data->window) {
++            SDL_SetMouseFocus(data->window);
++
++            mouse->last_x = xevent->xcrossing.x;
++            mouse->last_y = xevent->xcrossing.y;
++        }
+ 
+ #ifdef SDL_VIDEO_DRIVER_X11_XFIXES
+         {
+@@ -1554,6 +1561,11 @@ static void X11_DispatchEvent(SDL_VideoDevice *_this, XEvent *xevent)
+             SDL_SendMouseMotion(0, data->window, SDL_GLOBAL_MOUSE_ID, false, (float)xevent->xcrossing.x, (float)xevent->xcrossing.y);
+         }
+ 
++        // Also on grab: until the ungrab, another client receives the input.
++        if (xevent->xcrossing.detail != NotifyInferior) {
++            data->pointer_over_input_shape = false;
++        }
++
+         if (xevent->xcrossing.mode != NotifyGrab &&
+             xevent->xcrossing.mode != NotifyUngrab &&
+             xevent->xcrossing.detail != NotifyInferior) {
+@@ -1564,7 +1576,10 @@ static void X11_DispatchEvent(SDL_VideoDevice *_this, XEvent *xevent)
+                 X11_SetWindowKeyboardGrab(_this, data->window, false);
+             }
+ 
+-            SDL_SetMouseFocus(NULL);
++            // Leaving the input shape but not the window: mouse passthrough events take over, and they send the leave.
++            if (!SDL_MousePassthroughKeepsFocus(data->window, (float)xevent->xcrossing.x, (float)xevent->xcrossing.y)) {
++                SDL_SetMouseFocus(NULL);
++            }
+         }
+     } break;
+ 
+@@ -2410,6 +2425,8 @@ void X11_PumpEvents(SDL_VideoDevice *_this)
+         X11_DispatchEvent(_this, &xevent);
+     }
+ 
++    X11_SendPendingPassthroughMotion(_this);
++
+     // FIXME: Only need to do this when there are pending focus changes
+     X11_HandleFocusChanges(_this);
+ 
+diff --git a/src/video/x11/SDL_x11video.c b/src/video/x11/SDL_x11video.c
+index 2bae95968fdb739d5ba82851dac52c8013721a6a..7e1d97467e7644843fb5183f00777e853f31b165 100644
+--- a/src/video/x11/SDL_x11video.c
++++ b/src/video/x11/SDL_x11video.c
+@@ -190,6 +190,7 @@ static SDL_VideoDevice *X11_CreateDevice(void)
+     device->SetWindowHitTest = X11_SetWindowHitTest;
+     device->AcceptDragAndDrop = X11_AcceptDragAndDrop;
+     device->UpdateWindowShape = X11_UpdateWindowShape;
++    device->SetWindowMousePassthroughEvents = X11_SetWindowMousePassthroughEvents;
+     device->FlashWindow = X11_FlashWindow;
+ #ifdef SDL_USE_LIBDBUS
+     device->ApplyWindowProgress = DBUS_ApplyWindowProgress;
+diff --git a/src/video/x11/SDL_x11video.h b/src/video/x11/SDL_x11video.h
+index f55ebbb192d7d399d5c854bb5202bb615ccc872e..b2d44a7d2e9ec9793042fa89a7408b86d117182b 100644
+--- a/src/video/x11/SDL_x11video.h
++++ b/src/video/x11/SDL_x11video.h
+@@ -137,6 +137,12 @@ struct SDL_VideoData
+     SDL_Point global_mouse_position;
+     Uint32 global_mouse_buttons;
+ 
++    // Windows with mouse passthrough events, and whether raw motion arrived since the last pump.
++    int passthrough_window_count;
++    bool passthrough_motion_pending;
++    // The buttons the user holds, from raw events, which arrive even when another client receives the input.
++    SDL_MouseButtonFlags raw_buttons_held;
++
+     unsigned long xinput_last_button_serial;
+     int xinput_master_pointer_device;
+     bool xinput_hierarchy_changed;
+diff --git a/src/video/x11/SDL_x11window.h b/src/video/x11/SDL_x11window.h
+index a9cc77c3b53074d4f9605c188ba04b3bd8f3d6d4..431f0aeb8c5fa268e2375a52143327f7fc6335c2 100644
+--- a/src/video/x11/SDL_x11window.h
++++ b/src/video/x11/SDL_x11window.h
+@@ -62,6 +62,8 @@ struct SDL_WindowData
+     bool xinput2_mouse_enabled;
+     bool xinput2_keyboard_enabled;
+     bool mouse_grabbed;
++    // The pointer is over the window's input shape, so the window receives the input itself.
++    bool pointer_over_input_shape;
+     Uint64 last_focus_event_time;
+     unsigned long ignore_button_press_serial;
+     PendingFocusEnum pending_focus;
+diff --git a/src/video/x11/SDL_x11xinput2.c b/src/video/x11/SDL_x11xinput2.c
+index 105ef7a8ede130d6bdf5e14366bc93528e59b35b..1a1d733cc6a8bcf155105bf76b4fcfcf9f60ea08 100644
+--- a/src/video/x11/SDL_x11xinput2.c
++++ b/src/video/x11/SDL_x11xinput2.c
+@@ -43,6 +43,8 @@ static bool xinput2_multitouch_supported;
+ #ifdef SDL_VIDEO_DRIVER_X11_XINPUT2_SUPPORTS_GESTURE
+ static bool xinput2_gesture_supported;
+ #endif
++// Since XInput 2.1 the root window gets raw events while another client holds a grab, as the window beneath an overlay does from each press.
++static bool xinput2_raw_events_ignore_grabs;
+ 
+ /* Opcode returned X11_XQueryExtension
+  * It will be used in event processing
+@@ -260,6 +262,7 @@ bool X11_InitXinput2(SDL_VideoDevice *_this)
+     }
+ 
+     xinput2_initialized = true;
++    xinput2_raw_events_ignore_grabs = xinput2_version_atleast(version, 2, 1);
+ 
+ #ifdef SDL_VIDEO_DRIVER_X11_XINPUT2_SUPPORTS_SCROLLINFO // Smooth scrolling needs XInput 2.1
+     xinput2_scrolling_supported = xinput2_version_atleast(version, 2, 1);
+@@ -530,8 +533,134 @@ static SDL_XInput2DeviceInfo *xinput2_get_device_info(SDL_VideoData *videodata,
+ 
+     return devinfo;
+ }
++
++static bool xinput2_locate_passthrough_pointer(SDL_Window *window, void *userdata, float *x, float *y)
++{
++    const SDL_WindowData *data = window->internal;
++    Window root, child;
++    int root_x, root_y, win_x, win_y;
++    unsigned int mask;
++
++    // False when the pointer is on another screen.
++    if (!X11_XQueryPointer(data->videodata->display, data->xwindow, &root, &child, &root_x, &root_y, &win_x, &win_y, &mask)) {
++        return false;
++    }
++    *x = (float)win_x;
++    *y = (float)win_y;
++    return true;
++}
++
++// An SDL window receives the input itself, so it is not passthrough input: the window is under the pointer, or it grabs the pointer.
++static bool xinput2_pointer_over_own_input(const SDL_VideoData *videodata)
++{
++    /* A native press gives its window an implicit grab until the release. A button SDL still holds but the user released does not count: SDL
++       misses the release when the window stops being viewable and loses the grab. */
++    if ((SDL_GetMouseState(NULL, NULL) & ~SDL_GetMouse()->forwarded_buttons & videodata->raw_buttons_held) != 0) {
++        return true;
++    }
++    for (int i = 0; i < videodata->numwindows; ++i) {
++        const SDL_WindowData *data = videodata->windowlist[i];
++        if (data && (data->pointer_over_input_shape || data->mouse_grabbed)) {
++            return true;
++        }
++    }
++    return false;
++}
++
++static void xinput2_handle_passthrough_button(SDL_VideoDevice *_this, const XIRawEvent *rawev, bool down)
++{
++    SDL_VideoData *videodata = _this->internal;
++    int button = rawev->detail;
++    int xticks = 0, yticks = 0;
++
++    if (X11_FindPenByDeviceID(rawev->sourceid)) {
++        return;
++    }
++#if defined(SDL_VIDEO_DRIVER_X11_XINPUT2_SUPPORTS_SCROLLINFO) || defined(SDL_VIDEO_DRIVER_X11_XINPUT2_SUPPORTS_MULTITOUCH)
++    // Touch emulates these.
++    if (rawev->flags & XIPointerEmulated) {
++        return;
++    }
+ #endif
+ 
++    // Raw events carry the physical button.
++    if (button >= 1 && button <= xinput2_pointer_button_map_size) {
++        button = xinput2_pointer_button_map[button - 1];
++    }
++    if (button == 0 || X11_IsWheelEvent(button, &xticks, &yticks)) {
++        return;
++    }
++    if (button > 7) {
++        // X buttons 4 to 7 are the wheel, so X1 is 8.
++        button -= (8 - SDL_BUTTON_X1);
++    }
++
++    // Tracked even while no window has passthrough events, so it is right when one enables them during a press.
++    if (button <= SDL_BUTTON_X2) {
++        if (down) {
++            videodata->raw_buttons_held |= SDL_BUTTON_MASK(button);
++        } else {
++            videodata->raw_buttons_held &= ~SDL_BUTTON_MASK(button);
++        }
++    }
++
++    if (videodata->passthrough_window_count == 0) {
++        return;
++    }
++    // A press over an SDL window's own input arrives natively. A release is always reported, and SDL reports it only if it reported the press.
++    if (down && xinput2_pointer_over_own_input(videodata)) {
++        return;
++    }
++
++    SDL_SendPassthroughMouseButton(X11_GetEventTimestamp(rawev->time), xinput2_locate_passthrough_pointer, NULL, (Uint8)SDL_min(button, 255), down);
++}
++#endif
++
++bool X11_SetWindowMousePassthroughEvents(SDL_VideoDevice *_this, SDL_Window *window, bool enabled)
++{
++#ifdef SDL_VIDEO_DRIVER_X11_XINPUT2
++    SDL_VideoData *videodata = _this->internal;
++
++    if (!xinput2_initialized || !xinput2_raw_events_ignore_grabs) {
++        return SDL_Unsupported();
++    }
++
++    // Raw events are always selected on the root window, so there is nothing to start or stop.
++    if (enabled) {
++        ++videodata->passthrough_window_count;
++    } else {
++        --videodata->passthrough_window_count;
++        if (videodata->passthrough_window_count == 0) {
++            videodata->passthrough_motion_pending = false;
++        }
++        // The window keeps a focus it received natively.
++        if (SDL_GetMouseFocus() == window && !window->internal->pointer_over_input_shape) {
++            SDL_SetMouseFocus(NULL);
++        }
++    }
++    return true;
++#else
++    return SDL_Unsupported();
++#endif
++}
++
++void X11_SendPendingPassthroughMotion(SDL_VideoDevice *_this)
++{
++#ifdef SDL_VIDEO_DRIVER_X11_XINPUT2
++    SDL_VideoData *videodata = _this->internal;
++
++    if (!videodata->passthrough_motion_pending) {
++        return;
++    }
++    videodata->passthrough_motion_pending = false;
++
++    // Raw motion has no position, so read it once for all the motion since the last pump.
++    if (!xinput2_pointer_over_own_input(videodata)) {
++        SDL_SendPassthroughMouseMotion(0, xinput2_locate_passthrough_pointer, NULL);
++    }
++#endif
++}
++
+ void X11_HandleXinput2Event(SDL_VideoDevice *_this, XGenericEventCookie *cookie)
+ {
+ #ifdef SDL_VIDEO_DRIVER_X11_XINPUT2
+@@ -592,6 +721,9 @@ void X11_HandleXinput2Event(SDL_VideoDevice *_this, XGenericEventCookie *cookie)
+         if (is_pen) {
+             break; // Pens check for XI_Motion instead
+         }
++        if (videodata->passthrough_window_count > 0) {
++            videodata->passthrough_motion_pending = true;
++        }
+ 
+         SDL_XInput2DeviceInfo *devinfo = xinput2_get_device_info(videodata, rawev->deviceid);
+         if (!devinfo) {
+@@ -638,6 +770,11 @@ void X11_HandleXinput2Event(SDL_VideoDevice *_this, XGenericEventCookie *cookie)
+ 
+     case XI_RawButtonPress:
+     case XI_RawButtonRelease:
++    {
++        videodata->global_mouse_changed = true;
++        xinput2_handle_passthrough_button(_this, (const XIRawEvent *)cookie->data, cookie->evtype == XI_RawButtonPress);
++    } break;
++
+ #ifdef SDL_VIDEO_DRIVER_X11_XINPUT2_SUPPORTS_MULTITOUCH
+     case XI_RawTouchBegin:
+     case XI_RawTouchUpdate:
+diff --git a/src/video/x11/SDL_x11xinput2.h b/src/video/x11/SDL_x11xinput2.h
+index ed4b5597a74b5d7434e1207e9960b671ecd10db3..a66ee2f796bac8f9a06c75e9c146749211933f90 100644
+--- a/src/video/x11/SDL_x11xinput2.h
++++ b/src/video/x11/SDL_x11xinput2.h
+@@ -42,5 +42,7 @@ extern bool X11_Xinput2SelectMouseAndKeyboard(SDL_VideoDevice *_this, SDL_Window
+ extern void X11_Xinput2UpdateDevices(SDL_VideoDevice *_this);
+ extern void X11_Xinput2UpdatePointerMapping(SDL_VideoDevice *_this);
+ extern bool X11_Xinput2HandlesMotionForWindow(SDL_WindowData *window_data);
++extern bool X11_SetWindowMousePassthroughEvents(SDL_VideoDevice *_this, SDL_Window *window, bool enabled);
++extern void X11_SendPendingPassthroughMotion(SDL_VideoDevice *_this);
+ 
+ #endif // SDL_x11xinput2_h_
