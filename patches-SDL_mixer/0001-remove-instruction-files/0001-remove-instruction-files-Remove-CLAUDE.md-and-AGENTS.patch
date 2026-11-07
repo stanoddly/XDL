@@ -1,0 +1,66 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: botoddly <250804054+botoddly@users.noreply.github.com>
+Date: Sat, 7 Nov 2026 09:58:12 +0100
+Subject: [PATCH] remove-instruction-files: Remove CLAUDE.md and AGENTS.md
+
+---
+ AGENTS.md | 20 --------------------
+ CLAUDE.md | 22 ----------------------
+ 2 files changed, 42 deletions(-)
+ delete mode 100644 AGENTS.md
+ delete mode 100644 CLAUDE.md
+
+diff --git a/AGENTS.md b/AGENTS.md
+deleted file mode 100644
+index 7709baa11a1ddc0d3e09ca81be954a46d9a275a0..0000000000000000000000000000000000000000
+--- a/AGENTS.md
++++ /dev/null
+@@ -1,20 +0,0 @@
+-AI must not be used to generate code for contributions to this project.
+-
+-"AI" in this case means a Large Language Model ("LLM"), such as ChatGPT,
+-Claude, Copilot, Grok, etc.
+-
+-AI-generated code is based upon sources of unknown origins and may not be
+-compatible with the Zlib license, or may introduce conflicting license terms
+-if they include code from other projects.
+-
+-AI can be used to identify issues with contributions to this project, but the
+-solutions to those issues should be authored by humans.
+-
+-We have found that AI will frequently hallucinate issues that are not actually
+-problems in practice, report incorrect information, and describe problems that
+-are actually not issues at all. If AI identifies a problem with this codebase,
+-please make sure you understand what it is saying and have independently
+-confirmed that the issue exists before submitting a bug report or pull request.
+-
+-Any pull request to this project will ask you to confirm that you are the
+-author and that you are contributing your changes under the Zlib license.
+diff --git a/CLAUDE.md b/CLAUDE.md
+deleted file mode 100644
+index c8408cf2c112a5a0823c0b3efd97e63cf8e604a8..0000000000000000000000000000000000000000
+--- a/CLAUDE.md
++++ /dev/null
+@@ -1,22 +0,0 @@
+-AI must not be used to generate code for contributions to this project.
+-
+-"AI" in this case means a Large Language Model ("LLM"), such as ChatGPT,
+-Claude, Copilot, Grok, etc.
+-
+-AI-generated code is based upon sources of unknown origins and may not be
+-compatible with the Zlib license, or may introduce conflicting license terms
+-if they include code from other projects.
+-
+-AI can be used to identify issues with contributions to this project, but the
+-solutions to those issues should be authored by humans.
+-
+-We have found that AI will frequently hallucinate issues that are not actually
+-problems in practice, report incorrect information, and describe problems that
+-are actually not issues at all. If AI identifies a problem with this codebase,
+-please make sure you understand what it is saying and have independently
+-confirmed that the issue exists before submitting a bug report or pull request.
+-
+-Any pull request to this project will ask you to confirm that you are the
+-author and that you are contributing your changes under the Zlib license.
+-
+-
