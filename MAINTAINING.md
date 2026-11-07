@@ -2,6 +2,8 @@
 
 `tools/apply.sh` turns `patches/` into commits in `build/SDL`. `tools/export.sh` turns those commits back into `patches/`.
 
+SDL_image, SDL_ttf and SDL_mixer work the same way. Pass the project name, as in `tools/apply.sh SDL_image`, and the tools use `external/SDL_image`, `patches-SDL_image/` and `build/SDL_image`. The sections below name SDL; read `build/<project>` for a satellite.
+
 ## Commit subjects
 
 A commit belongs to the patch directory named at the start of its subject, without the number. For example, `library-name: Build the library as XDL3` belongs to `patches/0002-library-name/`.
@@ -28,16 +30,42 @@ Declare it in `include/XDL/XDL.h` with an `XDL_` prefix, and append it to `SDL_d
 
 ## Moving to a new SDL release
 
-1. Move the submodule, with full history: `git -C external/SDL fetch --tags origin`, `git -C external/SDL checkout <new-tag>`, `git add external/SDL`.
+1. Record the notices, as in step 1 of [Moving a satellite to a new release](#moving-a-satellite-to-a-new-release). Then move the submodule, with full history: `git -C external/SDL fetch --tags origin`, `git -C external/SDL checkout <new-tag>`, `git add external/SDL`.
 2. Review `git diff <old-tag> <new-tag>` for the paths the patches touch. A new file can apply and compile while SDL changes behavior around it. Also confirm that SDL has not claimed shader format bit `1u << 6`, which XDL uses for WGSL.
 3. Run `tools/apply.sh`. At a conflict, read the patch's README, resolve it in `build/SDL`, and run `git am --continue`. To start over, run `git am --abort` there, then `tools/apply.sh`.
 4. If the release adds functions to `SDL_dynapi_procs.h`, keep XDL's lines last and increase the counter in `SDL_DYNAPI_VERSION`. XDL's slots move, so an older XDL app would otherwise call the wrong function through `SDL3_DYNAMIC_API`.
 5. Run `tools/export.sh`, then update any README that changed.
-6. Update `XDL_VERSION` in `.github/workflows/build.yml`.
+6. Rebuild XDL and the satellites, and compare the notices, as in [Third-party notices](#third-party-notices).
+7. Update `XDL_VERSION` in `.github/workflows/build.yml`.
+
+## Moving a satellite to a new release
+
+1. Before the move, record the notices and the files with license texts, from a Linux Ninja build of every project:
+
+   ```
+   tools/third-party-notices.sh build/install build/notices-before.txt
+   cat build/notices/*.sources | xargs grep -l -i -E "licen[cs]e|copyright|permission to use|permission is hereby|freely granted|public domain|unicode\.org" \
+     | sed "s|^$(pwd -P)/||" | sort > build/license-files-before.txt
+   ```
+
+2. Move the submodule: `git -C external/SDL_image fetch --tags origin`, `git -C external/SDL_image checkout <new-tag>`, `git add external/SDL_image`.
+3. Review `git diff <old-tag> <new-tag>` for the paths the patches touch, and for `AGENTS.md` or `CLAUDE.md` files. Such files tell agents not to contribute upstream; delete them in a patch, as `patches-SDL_mixer/0001-remove-instruction-files` does.
+4. Run `tools/apply.sh SDL_image` and `tools/export.sh SDL_image`, and resolve conflicts as for SDL.
+5. Check the codecs in `tools/build-project.sh`. Each satellite's list of vendored submodules matches its CMake flags. A new codec option or submodule needs a decision there, and its license must allow linking into a zlib-licensed library.
+6. Run `tools/build-project.sh SDL_image build/install`, then `tools/check-dependencies.sh` on the library. Compare the codec summary that CMake prints with the old one.
+7. Run step 1 again into `build/notices-after.txt` and `build/license-files-after.txt`, and compare them, as described in [Third-party notices](#third-party-notices).
+
+## Third-party notices
+
+CI's `linux-x64` job runs `tools/third-party-notices.sh` and uploads the result as the `third-party-notices` artifact. The file holds each library's license, the codec licenses that SDL_image and SDL_mixer install, notices copied from single source files, and every copyright line of every compiled source and header. The script finds the compiled files through `ninja -t query` and `ninja -t deps`, so it needs Ninja builds, and it covers only what Linux x64 compiles.
+
+The copied notices are a list kept by hand in the script. After a move of SDL or a satellite, compare the before and after files of the section above. A new copyright holder or a new file with a license text points to code to read. Add a `notice` or `notice_file` entry when that code's license asks to keep its notice in copies or documentation and the library's own license does not cover it. Public-domain code and zlib-licensed code need no entry. A notice that moved makes the script fail with "missing or empty"; fix its start and end patterns.
+
+Other platforms compile some sources that Linux x64 does not, such as Windows and macOS backends and ARM code in libpng and Opus. Read their license headers by hand when a move touches them.
 
 ## Marking a build
 
-Pass `-DSDL_VENDOR_INFO=XDL-<version> -DSDL_REVISION=SDL-<SDL version>-<XDL commit>`. The vendor text helps meet the zlib rule that altered versions are plainly marked. The explicit revision is needed because SDL otherwise uses `git describe`, whose result depends on which tags a clone has.
+Pass `-DSDL_VENDOR_INFO=XDL-<version> -DSDL_REVISION=SDL-<SDL version>-<XDL commit>`. The vendor text helps meet the zlib rule that altered versions are plainly marked. The explicit revision is needed because SDL otherwise uses `git describe`, whose result depends on which tags a clone has. The satellites have no vendor text. Their library names, `XDL3_image`, `XDL3_ttf` and `XDL3_mixer`, mark them instead.
 
 ## Reviewing a patch change
 

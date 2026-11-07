@@ -30,7 +30,7 @@ is_allowed() {
       ;;
     *.dll)
       case "$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')" in
-        xdl3.dll | advapi32.dll | gdi32.dll | imm32.dll | kernel32.dll | ole32.dll | oleaut32.dll | setupapi.dll | shell32.dll | user32.dll | version.dll | winmm.dll) return 0 ;;
+        xdl3.dll | advapi32.dll | gdi32.dll | imm32.dll | kernel32.dll | ole32.dll | oleaut32.dll | rpcrt4.dll | setupapi.dll | shell32.dll | user32.dll | usp10.dll | version.dll | winmm.dll) return 0 ;;
       esac
       ;;
   esac

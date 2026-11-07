@@ -289,6 +289,27 @@ git -C "$xdl" clean --quiet -fd -- patches
 require_clean_patches "default project"
 pass "with no argument, the tools use patches/ and build/SDL and leave other projects alone"
 
+collect_runtime="$xdl/tools/collect-runtime.sh"
+prefix=$scratch/prefix
+mkdir -p "$prefix/lib" "$prefix/bin"
+for library in XDL3 XDL3_image XDL3_ttf XDL3_mixer; do
+  echo "$library" > "$prefix/lib/lib$library.so.0.1.0"
+  ln -s "lib$library.so.0.1.0" "$prefix/lib/lib$library.so.0"
+  echo "$library" > "$prefix/bin/$library.dll"
+done
+"$collect_runtime" linux-x64 "$prefix" "$scratch/runtime/linux" > /dev/null
+[[ "$(ls "$scratch/runtime/linux" | LC_ALL=C sort | tr '\n' ' ')" == "libXDL3.so libXDL3_image.so libXDL3_mixer.so libXDL3_ttf.so " ]] \
+  || fail "collect-runtime: unexpected Linux files: $(ls "$scratch/runtime/linux")"
+[[ ! -L "$scratch/runtime/linux/libXDL3_ttf.so" && "$(cat "$scratch/runtime/linux/libXDL3_ttf.so")" == XDL3_ttf ]] \
+  || fail "collect-runtime: libXDL3_ttf.so is not a copy of the installed library"
+pass "collect-runtime copies the Linux libraries under their published names"
+"$collect_runtime" win-arm64 "$prefix" "$scratch/runtime/windows" > /dev/null
+[[ "$(ls "$scratch/runtime/windows" | LC_ALL=C sort | tr '\n' ' ')" == "XDL3.dll XDL3_image.dll XDL3_mixer.dll XDL3_ttf.dll " ]] \
+  || fail "collect-runtime: unexpected Windows files: $(ls "$scratch/runtime/windows")"
+pass "collect-runtime copies the Windows libraries"
+expect_refusal "collect-runtime refuses an unknown RID" "Unknown RID: android-arm64" "$collect_runtime" android-arm64 "$prefix" "$scratch/runtime/android"
+expect_refusal "collect-runtime refuses a missing library" "lib/libXDL3.0.dylib does not exist" "$collect_runtime" osx-arm64 "$prefix" "$scratch/runtime/osx"
+
 if [[ "$(uname)" == Linux ]]; then
   check_dependencies="$xdl/tools/check-dependencies.sh"
   libraries=$scratch/libraries

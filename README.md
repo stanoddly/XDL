@@ -22,9 +22,23 @@ cmake --build build/cmake --config Release
 
 The library is `XDL3`: `libXDL3.so.0`, `XDL3.dll` or `libXDL3.0.dylib`. The `SDL_` function names, `SDL3/` headers, `SDL3::` CMake targets and the `sdl3` pkg-config package stay the same, so code written for SDL builds against it. What XDL adds to the API is in `XDL/XDL.h`. On Emscripten, the SDL GPU API runs on WebGPU: see [the patch's README](patches/0007-webgpu-backend/README.md). Do not load XDL and a stock SDL in one process, because their symbols clash.
 
+## SDL_image, SDL_ttf and SDL_mixer
+
+XDL also builds these libraries against XDL3, as `XDL3_image`, `XDL3_ttf` and `XDL3_mixer`. A stock `SDL3_image` needs `libSDL3`, so it cannot run with XDL. `external/<library>` pins a released tag, and `patches-<library>/` holds its patches. After the build above:
+
+```sh
+cmake --install build/cmake --prefix build/install --config Release
+tools/apply.sh SDL_image
+tools/build-project.sh SDL_image build/install
+```
+
+`build-project.sh` fetches the codecs that the library vendors and links them in, so each library needs only XDL3 and system libraries. The function names, headers, CMake targets and pkg-config packages stay those of SDL_image, SDL_ttf and SDL_mixer. SDL_mixer's GME codec is off, because it would link LGPL code into the library.
+
+CI publishes each platform's libraries as the `xdl3-<rid>` artifact, in its `<rid>/native/` folder, and their licenses as the `third-party-notices` artifact. The file names drop the version, such as `libXDL3_image.so`, while a satellite asks for `libXDL3.so.0`. When you load the libraries by path, load XDL3 first, so the loader finds it already loaded.
+
 ## Patches
 
-Each directory in `patches/` is one change, with a `README.md` that explains it. [MAINTAINING.md](MAINTAINING.md) covers changing a patch and moving to a new SDL release.
+Each directory in `patches/` and `patches-<library>/` is one change, with a `README.md` that explains it. [MAINTAINING.md](MAINTAINING.md) covers changing a patch and moving to a new SDL release.
 
 ## Bugs
 
@@ -32,4 +46,4 @@ Report XDL bugs in this repo, not to SDL. Report a problem to SDL only if a huma
 
 ## License
 
-XDL uses the zlib license. See [LICENSE](LICENSE).
+XDL uses the zlib license. See [LICENSE](LICENSE). The built libraries also contain third-party code, whose licenses CI collects with `tools/third-party-notices.sh`.

@@ -24,19 +24,22 @@ jobs:
 
       - name: Apply and export
         run: |
-          tools/apply.sh
-          tools/export.sh
-          git diff --exit-code -- patches/
-          test -z "$(git status --porcelain --untracked-files=all -- patches/)"
+          for project in SDL SDL_image SDL_ttf SDL_mixer; do
+            tools/apply.sh "$project"
+            tools/export.sh "$project"
+          done
+          git diff --exit-code -- 'patches*'
+          test -z "$(git status --porcelain --untracked-files=all -- 'patches*')"
 
-      - name: Write the range-diff to the job summary
+      - name: Write the range-diffs to the job summary
         if: github.event_name == 'pull_request'
         run: |
-          {
+          for project in SDL SDL_image SDL_ttf SDL_mixer; do
+            echo "### $project"
             echo '```'
-            tools/range-diff.sh "${{ github.event.pull_request.base.sha }}"
+            tools/range-diff.sh "${{ github.event.pull_request.base.sha }}" "$project"
             echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
+          done >> "$GITHUB_STEP_SUMMARY"
 
   webgpu:
     name: WebGPU
@@ -82,13 +85,16 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { rid: linux-x64, os: ubuntu-22.04, flags: -GNinja, library: lib/libXDL3.so.0, output: libXDL3.so, ctest: true }
-          - { rid: linux-arm64, os: ubuntu-22.04-arm, flags: -GNinja, library: lib/libXDL3.so.0, output: libXDL3.so, ctest: true }
-          - { rid: win-x64, os: windows-2025, flags: -A x64, library: bin/XDL3.dll, output: XDL3.dll, ctest: true }
-          # Cross-compiled on Intel, because jobs for the arm64 macOS runners wait for capacity until GitHub cancels them
-          - { rid: osx-arm64, os: macos-15-intel, flags: -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0, library: lib/libXDL3.0.dylib, output: libXDL3.dylib, ctest: false }
-          # osx-arm64 binaries cannot run on that runner, so this job runs the tests and publishes nothing
-          - { rid: osx-x64-tests, os: macos-15-intel, flags: -DCMAKE_OSX_ARCHITECTURES=x86_64 -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0, ctest: true }
+          - { rid: linux-x64, os: ubuntu-22.04, flags: -GNinja, ctest: true }
+          - { rid: linux-arm64, os: ubuntu-22.04-arm, flags: -GNinja, ctest: true }
+          - { rid: win-x64, os: windows-2025, flags: -A x64 -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded, ctest: true }
+          # SDL's own CI runs no tests on Windows ARM64, and testprocess crashes there in process_testStdinToStdout
+          - { rid: win-arm64, os: windows-11-arm, flags: -A ARM64 -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded, ctest: true, ctest_args: -E ^testprocess$ }
+          # Cross-compiled on Intel, because jobs for the arm64 macOS runners wait for capacity until GitHub cancels them.
+          # Opus picks its intrinsics from the Intel host, so they are off.
+          - { rid: osx-arm64, os: macos-15-intel, flags: -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0, satellite_flags: -DOPUS_DISABLE_INTRINSICS=ON, ctest: false }
+          # osx-arm64 binaries cannot run on that runner, so this job runs the macOS tests
+          - { rid: osx-x64, os: macos-15-intel, flags: -DCMAKE_OSX_ARCHITECTURES=x86_64 -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0, ctest: true }
 
     defaults:
       run:
@@ -99,6 +105,9 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: true
+
+      - name: Set the revision
+        run: echo "XDL_REVISION=SDL-${XDL_VERSION%-*}-${GITHUB_SHA::12}" >> "$GITHUB_ENV"
 
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
@@ -111,15 +120,17 @@ jobs:
             libx11-dev libxcursor-dev libxext-dev libxi-dev libxinerama-dev libxkbcommon-dev libxrandr-dev libxss-dev \
             libxt-dev libxv-dev libxxf86vm-dev libdrm-dev libgbm-dev libpipewire-0.3-dev libdecor-0-dev libjack-dev \
             libusb-1.0-0-dev
+          # Vendored libtiff in SDL_image would link this if its patch broke
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y libjbig-dev
 
       - name: Apply patches
-        run: tools/apply.sh
+        run: for project in SDL SDL_image SDL_ttf SDL_mixer; do tools/apply.sh "$project"; done
 
       - name: Build
         run: |
           cmake -S build/SDL -B build/cmake ${{ matrix.flags }} -DCMAKE_BUILD_TYPE=Release \
             -DSDL_SHARED=ON -DSDL_STATIC=OFF -DSDL_TEST_LIBRARY=ON -DSDL_TESTS=ON -DSDL_DISABLE_INSTALL_DOCS=ON -DSDL_RELOCATABLE=ON \
-            "-DSDL_VENDOR_INFO=XDL-$XDL_VERSION" "-DSDL_REVISION=SDL-${XDL_VERSION%-*}-${GITHUB_SHA::12}"
+            "-DSDL_VENDOR_INFO=XDL-$XDL_VERSION" "-DSDL_REVISION=$XDL_REVISION" -DCMAKE_INSTALL_LIBDIR=lib
           cmake --build build/cmake --config Release --parallel
           cmake --install build/cmake --prefix build/install --config Release
 
@@ -127,7 +138,7 @@ jobs:
         if: matrix.ctest
         env:
           SDL_TESTS_QUICK: 1
-        run: ctest --test-dir build/cmake -C Release --no-tests=error --output-on-failure -j2
+        run: ctest --test-dir build/cmake -C Release --no-tests=error --output-on-failure -j2 ${{ matrix.ctest_args }}
 
       - name: Check the library name
         if: runner.os == 'Linux'
@@ -140,16 +151,46 @@ jobs:
           cmake -S tests/consumer -B build/consumer ${{ matrix.flags }} -DCMAKE_BUILD_TYPE=Release "-DCMAKE_PREFIX_PATH=$PWD/build/install"
           cmake --build build/consumer --config Release
 
+      - name: Build the satellite libraries
+        run: for project in SDL_image SDL_ttf SDL_mixer; do tools/build-project.sh "$project" build/install ${{ matrix.flags }} ${{ matrix.satellite_flags }}; done
+
       - name: Collect the runtime
-        if: matrix.library
+        run: tools/collect-runtime.sh "${{ matrix.rid }}" build/install "runtimes/${{ matrix.rid }}/native"
+
+      - name: Check the dependencies
         run: |
-          mkdir -p "runtimes/${{ matrix.rid }}/native"
-          cp -L "build/install/${{ matrix.library }}" "runtimes/${{ matrix.rid }}/native/${{ matrix.output }}"
+          status=0
+          for library in "runtimes/${{ matrix.rid }}/native"/*; do
+            tools/check-dependencies.sh "$library" || status=1
+          done
+          exit $status
+
+      - name: Link a small project against the satellite libraries
+        run: |
+          cmake -S tests/satellites -B build/satellites ${{ matrix.flags }} -DCMAKE_BUILD_TYPE=Release "-DCMAKE_PREFIX_PATH=$PWD/build/install" \
+            "-DRUNTIME_DIR=$PWD/runtimes/${{ matrix.rid }}/native" "-DXDL_REVISION=$XDL_REVISION"
+          cmake --build build/satellites --config Release
+
+      - name: Load the runtime
+        if: matrix.ctest
+        run: ctest --test-dir build/satellites -C Release --no-tests=error --output-on-failure
 
       - name: Upload
-        if: matrix.library
         uses: actions/upload-artifact@v4
         with:
           name: xdl3-${{ matrix.rid }}
           path: runtimes
+          if-no-files-found: error
+
+      - name: Write the third-party notices
+        if: matrix.rid == 'linux-x64'
+        run: tools/third-party-notices.sh build/install build/THIRD-PARTY-NOTICES.txt
+
+      # Its own artifact, so every xdl3-<rid> artifact has the same layout
+      - name: Upload the third-party notices
+        if: matrix.rid == 'linux-x64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: third-party-notices
+          path: build/THIRD-PARTY-NOTICES.txt
           if-no-files-found: error
