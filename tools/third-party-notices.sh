@@ -142,7 +142,41 @@ freetype_acknowledgment="Portions of this software are copyright © $freetype_ye
 
   # Found with a search of every compiled source and header for copyright lines and license texts. Public-domain code and zlib-licensed
   # code, whose licenses ask for no notice in a binary, are not listed.
-  # NOTICES
+  notice "SDL: math functions from Sun's libm (XDL3)" build/SDL/src/libm/e_atan2.c 'Copyright \(C\) 1993 by Sun Microsystems' 'is preserved\.'
+  notice_file "SDL: YUV to RGB conversion (XDL3)" build/SDL/src/video/yuv2rgb/LICENSE
+  notice "SDL: keysym to UCS conversion (XDL3)" build/SDL/src/events/imKStoUCS.c 'Copyright \(C\) 2003-2006,2008 Jamey Sharp' 'DEALINGS IN THE SOFTWARE\.$'
+  # HIDAPI offers GPL-3.0, BSD-3-Clause or its original license. XDL uses it under BSD-3-Clause.
+  notice_file "SDL: HIDAPI (XDL3)" build/SDL/src/hidapi/LICENSE-bsd.txt
+  notice "SDL: EDID parser (XDL3)" build/SDL/src/video/x11/edid-parse.c 'Copyright 2007 Red Hat, Inc\.' 'USE OR OTHER DEALINGS IN THE SOFTWARE\.$'
+  notice "SDL: XSETTINGS client (XDL3)" build/SDL/src/video/x11/xsettings-client.c 'Copyright © 2001, 2007 Red Hat, Inc\.' 'USE OR PERFORMANCE OF THIS SOFTWARE\.$'
+  notice "SDL: XDG user directory lookup (XDL3)" build/SDL/src/filesystem/unix/SDL_sysfilesystem.c 'Copyright \(c\) 2007 Red Hat, Inc\.' '^  SOFTWARE\.$'
+  notice "SDL: Mesa OpenGL header (XDL3)" build/SDL/include/SDL3/SDL_opengl.h 'Copyright \(C\) 1999-2006  Brian Paul' 'OTHER DEALINGS IN THE SOFTWARE\.$'
+  notice "SDL: Khronos platform header (XDL3)" build/SDL/include/SDL3/SDL_egl.h 'Copyright \(c\) 2008-2018 The Khronos Group Inc\.' 'OTHER DEALINGS IN THE MATERIALS\.$'
+  # The Vulkan headers in src/video/khronos and the EGL part of SDL_egl.h are Apache-2.0, and no pinned source carries its text.
+  notice_file "SDL: Khronos Vulkan and EGL headers, under the Apache License 2.0 (XDL3)" LICENSES/Apache-2.0.txt
+  # The generated Wayland protocol code carries the license of each protocol's XML. pointer-gestures has no notice.
+  for protocol in alpha-modifier-v1 color-management-v1 cursor-shape-v1 fractional-scale-v1 frog-color-management-v1 idle-inhibit-unstable-v1 \
+    input-timestamps-unstable-v1 keyboard-shortcuts-inhibit-unstable-v1 pointer-constraints-unstable-v1 pointer-warp-v1 primary-selection-unstable-v1 \
+    relative-pointer-unstable-v1 tablet-v2 text-input-unstable-v3 viewporter wayland xdg-activation-v1 xdg-decoration-unstable-v1 xdg-dialog-v1 \
+    xdg-foreign-unstable-v2 xdg-output-unstable-v1 xdg-shell xdg-toplevel-icon-v1; do
+    notice "SDL: Wayland protocol $protocol (XDL3)" "build/cmake/wayland-generated-protocols/$protocol-protocol.c" '^ \* Copyright' ' SOFTWARE\.$'
+  done
+  notice "SDL_image: GIF decoder adapted from XPaint (XDL3_image)" build/SDL_image/src/IMG_gif.c 'Copyright 1990, 1991, 1993 David Koblas' 'provided "as is"'
+  notice "SDL_image: QOI codec (XDL3_image)" build/SDL_image/src/qoi.h 'Copyright\(c\) 2021 Dominic Szablewski' '^SOFTWARE\.$'
+  notice "libtiff: hash set (XDL3_image)" build/SDL_image/external/libtiff/libtiff/tif_hash_set.c 'Copyright \(c\) 2008-2009, Even Rouault' 'DEALINGS IN THE SOFTWARE\.$'
+  notice "FreeType: BDF driver (XDL3_ttf)" build/SDL_ttf/external/freetype/src/bdf/README '^License$' '^THE USE OR OTHER DEALINGS IN THE SOFTWARE\.$'
+  notice "FreeType: PCF driver (XDL3_ttf)" build/SDL_ttf/external/freetype/src/pcf/README '^License$' '^SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE\.$'
+  notice "FreeType: PCF bitmap utilities (XDL3_ttf)" build/SDL_ttf/external/freetype/src/pcf/pcfutil.c 'Copyright 1990, 1994, 1998  The Open Group' 'written authorization from The Open Group\.'
+  notice "FreeType: HarfBuzz glue of the auto-hinter (XDL3_ttf)" build/SDL_ttf/external/freetype/src/autofit/ft-hb.c 'Copyright © 2009, 2023  Red Hat' 'OR MODIFICATIONS\.$'
+  notice_file "HarfBuzz: Universal Shaping Engine data (XDL3_ttf)" build/SDL_ttf/external/harfbuzz/src/ms-use/COPYING
+  notice "HarfBuzz: Unicode character database functions (XDL3_ttf)" build/SDL_ttf/external/harfbuzz/src/hb-ucd.cc 'Copyright \(C\) 2012 Grigori Goronzy' 'USE OR PERFORMANCE OF THIS SOFTWARE\.'
+  notice "HarfBuzz: fasthash (XDL3_ttf)" build/SDL_ttf/external/harfbuzz/src/hb-algs.hh 'Copyright \(C\) 2012 Zilong Tan' '^   SOFTWARE\.$'
+  # No pinned source carries the license of the Unicode data HarfBuzz generates its tables from, so the repo keeps a copy of
+  # https://www.unicode.org/license.txt.
+  notice_file "HarfBuzz: tables generated from Unicode data (XDL3_ttf)" LICENSES/Unicode-3.0.txt
+  notice_file "SDL_mixer: TiMidity license (XDL3_mixer)" build/SDL_mixer/src/timidity/COPYING
+  notice_file "SDL_mixer: dr_libs license (XDL3_mixer)" build/SDL_mixer/src/dr_libs/LICENSE
+  notice "Vorbis: LPC routines (XDL3_mixer)" build/SDL_mixer/external/vorbis/lib/lpc.c 'Copyright 1992, 1993, 1994 by Jutta Degener' '^Carsten Bormann$'
 
   library_copyrights "XDL, including SDL" XDL3 SDL
   library_copyrights "SDL_image" XDL3_image SDL_image
