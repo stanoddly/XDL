@@ -28,6 +28,24 @@ Create `patches/NNNN-name/README.md` with a plain title, what the patch does and
 
 Declare it in `include/XDL/XDL.h` with an `XDL_` prefix, and append it to `SDL_dynapi_procs.h`, `SDL_dynapi_overrides.h` and `SDL_dynapi.sym`. If it changes XDL's dynamic API table in an incompatible way, increase the counter in `SDL_DYNAPI_VERSION`.
 
+## Releases
+
+Merging a pull request that raises `XDL_VERSION` to `main` releases it. The Release workflow builds every RID and publishes the GitHub release `v<XDL_VERSION>`. It holds one zip per RID with `runtimes/<rid>/native/`, `THIRD-PARTY-NOTICES.txt`, and notes with each library's tag and commit.
+
+`XDL_VERSION` is `<SDL version>-<N>`, such as `3.4.20-1`. N starts at 1 for each SDL release. Raise N for any change to what a release contains: the submodules, the patches, the licenses, the build tools or the workflows that build. `tools/check-version.sh` lists these files. CI fails a pull request that changes one of them while `v<XDL_VERSION>` exists. A change to docs or tests needs no raise and releases nothing.
+
+A failed release publishes nothing. Fix the cause, then run Release by hand on `main`. If two pull requests raised `XDL_VERSION` to the same value, Release fails after the second one. Raise N again to release it.
+
+## Update pull requests
+
+The Update upstream workflow runs every day. When SDL or a satellite has a newer `release-3.*` tag, it opens a pull request from the `update-upstream` branch. The pull request moves the submodules and raises `XDL_VERSION`, and the workflow starts Build on it. It never merges.
+
+Review it as the next two sections describe, and push any fix to its branch. If Build fails at "Apply and export", a patch needs work in `build/<project>` and a new export. Merging the pull request releases it.
+
+- While it is open, newer releases wait.
+- To skip a release, close the pull request. A new one opens only when a newer release changes the title.
+- GitHub turns off the schedule of a public repository after 60 days without activity. Enable the workflow again on its page under Actions.
+
 ## Moving to a new SDL release
 
 1. Record the notices, as in step 1 of [Moving a satellite to a new release](#moving-a-satellite-to-a-new-release). Then move the submodule, with full history: `git -C external/SDL fetch --tags origin`, `git -C external/SDL checkout <new-tag>`, `git add external/SDL`.
@@ -36,7 +54,7 @@ Declare it in `include/XDL/XDL.h` with an `XDL_` prefix, and append it to `SDL_d
 4. If the release adds functions to `SDL_dynapi_procs.h`, keep XDL's lines last and increase the counter in `SDL_DYNAPI_VERSION`. XDL's slots move, so an older XDL app would otherwise call the wrong function through `SDL3_DYNAMIC_API`.
 5. Run `tools/export.sh`, then update any README that changed.
 6. Rebuild XDL and the satellites, and compare the notices, as in [Third-party notices](#third-party-notices).
-7. Update `XDL_VERSION` in `.github/workflows/build.yml`.
+7. Set `XDL_VERSION` to `<SDL version>-1`. An [update pull request](#update-pull-requests) has already done this and the move of step 1, so take the before files of step 1 from `main`.
 
 ## Moving a satellite to a new release
 
@@ -54,6 +72,7 @@ Declare it in `include/XDL/XDL.h` with an `XDL_` prefix, and append it to `SDL_d
 5. Check the codecs in `tools/build-project.sh`. Each satellite's list of vendored submodules matches its CMake flags. A new codec option or submodule needs a decision there, and its license must allow linking into a zlib-licensed library.
 6. Run `tools/build-project.sh SDL_image build/install`, then `tools/check-dependencies.sh` on the library. Compare the codec summary that CMake prints with the old one.
 7. Run step 1 again into `build/notices-after.txt` and `build/license-files-after.txt`, and compare them, as described in [Third-party notices](#third-party-notices).
+8. Raise the `-N` suffix of `XDL_VERSION`, such as `3.4.20-1` to `3.4.20-2`. An update pull request has already done this.
 
 ## Third-party notices
 

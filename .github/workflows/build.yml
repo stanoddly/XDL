@@ -3,9 +3,8 @@ name: Build
 on:
   workflow_dispatch:
   pull_request:
-
-env:
-  XDL_VERSION: 3.4.20-1
+  # Release runs this workflow before it publishes the artifacts.
+  workflow_call:
 
 jobs:
   tooling:
@@ -31,15 +30,26 @@ jobs:
           git diff --exit-code -- 'patches*'
           test -z "$(git status --porcelain --untracked-files=all -- 'patches*')"
 
+      # A run started by hand, such as the update pull request's, compares with main
+      - name: Find the base revision
+        if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+        env:
+          PULL_REQUEST_BASE: ${{ github.event.pull_request.base.sha }}
+        run: echo "BASE_REVISION=${PULL_REQUEST_BASE:-$(git merge-base origin/main HEAD)}" >> "$GITHUB_ENV"
+
       - name: Write the range-diffs to the job summary
-        if: github.event_name == 'pull_request'
+        if: env.BASE_REVISION != ''
         run: |
           for project in SDL SDL_image SDL_ttf SDL_mixer; do
             echo "### $project"
             echo '```'
-            tools/range-diff.sh "${{ github.event.pull_request.base.sha }}" "$project"
+            tools/range-diff.sh "$BASE_REVISION" "$project"
             echo '```'
           done >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Check that a change to a release raises XDL_VERSION
+        if: env.BASE_REVISION != ''
+        run: tools/check-version.sh "$BASE_REVISION"
 
   webgpu:
     name: WebGPU
@@ -106,8 +116,11 @@ jobs:
         with:
           submodules: true
 
-      - name: Set the revision
-        run: echo "XDL_REVISION=SDL-${XDL_VERSION%-*}-${GITHUB_SHA::12}" >> "$GITHUB_ENV"
+      - name: Set the version and revision
+        run: |
+          xdl_version=$(cat XDL_VERSION)
+          echo "XDL_VERSION=$xdl_version" >> "$GITHUB_ENV"
+          echo "XDL_REVISION=SDL-${xdl_version%-*}-${GITHUB_SHA::12}" >> "$GITHUB_ENV"
 
       - name: Install Linux dependencies
         if: runner.os == 'Linux'

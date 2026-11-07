@@ -34,7 +34,7 @@ tools/build-project.sh SDL_image build/install
 
 `build-project.sh` fetches the codecs that the library vendors and links them in, so each library needs only XDL3 and system libraries. The function names, headers, CMake targets and pkg-config packages stay those of SDL_image, SDL_ttf and SDL_mixer. SDL_mixer's GME codec is off, because it would link LGPL code into the library.
 
-CI publishes each platform's libraries as the `xdl3-<rid>` artifact, in its `<rid>/native/` folder, and their licenses as the `third-party-notices` artifact. The file names drop the version, such as `libXDL3_image.so`, while a satellite asks for `libXDL3.so.0`. When you load the libraries by path, load XDL3 first, so the loader finds it already loaded.
+Each [release](https://github.com/stanoddly/XDL/releases) has one zip per platform with `runtimes/<rid>/native/`, and the licenses in `THIRD-PARTY-NOTICES.txt`. CI also uploads them from every build, as the `xdl3-<rid>` and `third-party-notices` artifacts. The file names drop the version, such as `libXDL3_image.so`, while a satellite asks for `libXDL3.so.0`. When you load the libraries by path, load XDL3 first, so the loader finds it already loaded.
 
 ## Patches
 

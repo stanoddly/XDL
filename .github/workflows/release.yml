@@ -1,0 +1,107 @@
+name: Release
+
+# Publishes XDL_VERSION as the GitHub release v<XDL_VERSION> when that tag does not exist yet. Merging a pull request that raises
+# XDL_VERSION releases it. A failed release is run again by hand.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  resolve:
+    # A run started from another branch would release unreviewed code.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+
+    steps:
+      # A shallow checkout has no tags, so every push would look unreleased.
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Find the tag
+        id: tag
+        run: |
+          tag="v$(cat XDL_VERSION)"
+          if git rev-parse --verify --quiet "refs/tags/$tag" > /dev/null; then
+            # A change since the tag would never be released, as when two pull requests raised XDL_VERSION to the same value.
+            tools/check-version.sh "$tag"
+          else
+            echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    needs: resolve
+    if: needs.resolve.outputs.tag != ''
+    uses: ./.github/workflows/build.yml
+
+  publish:
+    needs: [resolve, build]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ needs.resolve.outputs.tag }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download the artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      # Each xdl3-<rid> artifact holds <rid>/native/, and each zip holds runtimes/<rid>/native/, the layout of a NuGet package.
+      - name: Zip the runtimes
+        run: |
+          mkdir dist
+          for artifact in artifacts/xdl3-*; do
+            rid=${artifact#artifacts/xdl3-}
+            mkdir -p "staging/$rid/runtimes"
+            cp -R "$artifact/$rid" "staging/$rid/runtimes/"
+            (cd "staging/$rid" && zip -q -r "$GITHUB_WORKSPACE/dist/xdl3-$rid.zip" runtimes)
+          done
+          cp artifacts/third-party-notices/THIRD-PARTY-NOTICES.txt dist/
+          ls -l dist
+
+      # A submodule's version is the upstream tag of its commit. The checkout fetches no submodule tags, so ls-remote finds it.
+      - name: Write the release notes
+        run: |
+          {
+            echo "XDL $TAG: SDL with XDL's patches, and SDL_image, SDL_ttf and SDL_mixer built against it as XDL3_image, XDL3_ttf and XDL3_mixer."
+            echo
+            echo "| Library | Version | Commit |"
+            echo "|---|---|---|"
+            echo "| XDL | $TAG | [${GITHUB_SHA::7}]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/commit/$GITHUB_SHA) |"
+            for path in $(git config --file .gitmodules --get-regexp '^submodule\.external/.*\.path$' | awk '{ print $2 }'); do
+              url=$(git config --file .gitmodules --get "submodule.$path.url")
+              url=${url%.git}
+              commit=$(git rev-parse "HEAD:$path")
+              version=$(git ls-remote --tags "$url" | awk -v commit="$commit" '$1 == commit { name = $2; sub(/^refs\/tags\//, "", name); sub(/\^\{\}$/, "", name); print name; exit }')
+              echo "| ${path#external/} | $version | [${commit::7}]($url/commit/$commit) |"
+            done
+            echo
+            echo "Each zip holds \`runtimes/<rid>/native/\` with XDL3 and the three satellite libraries. Load XDL3 before a satellite when you load them by path. Licenses: \`THIRD-PARTY-NOTICES.txt\`."
+          } > release-notes.md
+          cat release-notes.md
+
+      # gh release create would otherwise attach the release to a tag made while this run built.
+      - name: Publish the release
+        run: |
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" > /dev/null; then
+            echo "$TAG was released while this run built." >&2
+            exit 1
+          fi
+          gh release create "$TAG" dist/* --title "$TAG" --notes-file release-notes.md --target "$GITHUB_SHA"
