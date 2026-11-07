@@ -65,7 +65,7 @@ Other platforms compile some sources that Linux x64 does not, such as Windows an
 
 ## Marking a build
 
-Pass `-DSDL_VENDOR_INFO=XDL-<version> -DSDL_REVISION=SDL-<SDL version>-<XDL commit>`. The vendor text helps meet the zlib rule that altered versions are plainly marked. The explicit revision is needed because SDL otherwise uses `git describe`, whose result depends on which tags a clone has.
+Pass `-DSDL_VENDOR_INFO=XDL-<version> -DSDL_REVISION=SDL-<SDL version>-<XDL commit>`. The vendor text helps meet the zlib rule that altered versions are plainly marked. The explicit revision is needed because SDL otherwise uses `git describe`, whose result depends on which tags a clone has. The satellites have no vendor text. Their library names, `XDL3_image`, `XDL3_ttf` and `XDL3_mixer`, mark them instead.
 
 ## Reviewing a patch change
 

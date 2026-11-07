@@ -6,6 +6,8 @@
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 (( $# == 2 )) || die "usage: third-party-notices.sh <install prefix> <out file>"
+# The same order on every machine, so two files compare line by line.
+export LC_ALL=C
 install_prefix=$(cd "$1" && pwd -P)
 out_file=$2
 repo_real=$(cd "$repo_root" && pwd -P)
@@ -154,6 +156,9 @@ freetype_acknowledgment="Portions of this software are copyright © $freetype_ye
   notice "SDL: Khronos platform header (XDL3)" build/SDL/include/SDL3/SDL_egl.h 'Copyright \(c\) 2008-2018 The Khronos Group Inc\.' 'OTHER DEALINGS IN THE MATERIALS\.$'
   # The Vulkan headers in src/video/khronos and the EGL part of SDL_egl.h are Apache-2.0, and no pinned source carries its text.
   notice_file "SDL: Khronos Vulkan and EGL headers, under the Apache License 2.0 (XDL3)" LICENSES/Apache-2.0.txt
+  # The Direct3D 12 headers in src/video/directx come from microsoft/DirectX-Headers and name its MIT license without its text.
+  # Only Windows builds compile them, so the Linux search does not find them.
+  notice_file "SDL: Direct3D 12 headers from DirectX-Headers, in the Windows builds (XDL3)" LICENSES/DirectX-Headers-MIT.txt
   # The generated Wayland protocol code carries the license of each protocol's XML. pointer-gestures has no notice.
   for protocol in alpha-modifier-v1 color-management-v1 cursor-shape-v1 fractional-scale-v1 frog-color-management-v1 idle-inhibit-unstable-v1 \
     input-timestamps-unstable-v1 keyboard-shortcuts-inhibit-unstable-v1 pointer-constraints-unstable-v1 pointer-warp-v1 primary-selection-unstable-v1 \
