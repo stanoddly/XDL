@@ -18,6 +18,13 @@ jobs:
           fetch-depth: 0
           submodules: true
 
+      # A run started by hand, such as the update pull request's, compares with main
+      - name: Find the base revision
+        if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+        env:
+          PULL_REQUEST_BASE: ${{ github.event.pull_request.base.sha }}
+        run: echo "BASE_REVISION=${PULL_REQUEST_BASE:-$(git merge-base origin/main HEAD)}" >> "$GITHUB_ENV"
+
       - name: Test the scripts
         run: tests/tooling/run.sh
 
@@ -30,15 +37,9 @@ jobs:
           git diff --exit-code -- 'patches*'
           test -z "$(git status --porcelain --untracked-files=all -- 'patches*')"
 
-      # A run started by hand, such as the update pull request's, compares with main
-      - name: Find the base revision
-        if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
-        env:
-          PULL_REQUEST_BASE: ${{ github.event.pull_request.base.sha }}
-        run: echo "BASE_REVISION=${PULL_REQUEST_BASE:-$(git merge-base origin/main HEAD)}" >> "$GITHUB_ENV"
-
+      # Also after a failed export, which an upstream move causes even when every patch applies
       - name: Write the range-diffs to the job summary
-        if: env.BASE_REVISION != ''
+        if: ${{ !cancelled() && env.BASE_REVISION != '' }}
         run: |
           for project in SDL SDL_image SDL_ttf SDL_mixer; do
             echo "### $project"
@@ -48,7 +49,7 @@ jobs:
           done >> "$GITHUB_STEP_SUMMARY"
 
       - name: Check that a change to a release raises XDL_VERSION
-        if: env.BASE_REVISION != ''
+        if: ${{ !cancelled() && env.BASE_REVISION != '' }}
         run: tools/check-version.sh "$BASE_REVISION"
 
   webgpu:

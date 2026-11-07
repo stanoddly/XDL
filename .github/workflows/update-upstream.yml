@@ -31,10 +31,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Newer releases wait until the open pull request is merged or closed.
+      # Newer releases wait until the open pull request is merged or closed. A fork's branch of the same name does not count.
       - name: Look for an open pull request
         id: open
-        run: echo "count=$(gh pr list --head "$BRANCH" --state open --json number --jq length)" >> "$GITHUB_OUTPUT"
+        run: echo "count=$(gh pr list --head "$BRANCH" --state open --json isCrossRepository --jq '[.[] | select(.isCrossRepository | not)] | length')" >> "$GITHUB_OUTPUT"
 
       - name: Move to the newest releases
         id: update
@@ -47,7 +47,8 @@ jobs:
           fi
           title=$(head -n 1 "$RUNNER_TEMP/summary.md")
           # The title names every target tag. A closed pull request with this title was declined, and only a newer release proposes again.
-          declined=$(gh pr list --head "$BRANCH" --state closed --limit 1 --json title,state --jq '.[] | select(.state == "CLOSED") | .title')
+          declined=$(gh pr list --head "$BRANCH" --state all --json title,state,isCrossRepository \
+            --jq '[.[] | select((.isCrossRepository | not) and .state != "OPEN")][0] | select(.state == "CLOSED") | .title')
           if [[ "$declined" == "$title" ]]; then
             echo "A closed pull request already proposed: $title"
             exit 0

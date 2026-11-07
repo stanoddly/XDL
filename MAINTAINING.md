@@ -40,7 +40,7 @@ A failed release publishes nothing. Fix the cause, then run Release by hand on `
 
 The Update upstream workflow runs every day. When SDL or a satellite has a newer `release-3.*` tag, it opens a pull request from the `update-upstream` branch. The pull request moves the submodules and raises `XDL_VERSION`, and the workflow starts Build on it. It never merges.
 
-Review it as the next two sections describe, and push any fix to its branch. If Build fails at "Apply and export", a patch needs work in `build/<project>` and a new export. Merging the pull request releases it.
+Review it as the next two sections describe, and push any fix to its branch. Build usually fails at "Apply and export" on such a branch. When `tools/apply.sh` stopped with "does not apply", a patch needs work in `build/<project>`. Otherwise the patches only need a new export: run `tools/apply.sh` and `tools/export.sh` for the project, and push the changed patches. Merging the pull request releases it.
 
 - While it is open, newer releases wait.
 - To skip a release, close the pull request. A new one opens only when a newer release changes the title.
