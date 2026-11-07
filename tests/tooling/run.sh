@@ -4,7 +4,8 @@ set -euo pipefail
 
 tools_source=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../tools" && pwd)
 scratch=$(mktemp -d)
-trap 'rm -rf "$scratch"' EXIT
+# A failed check can leave a folder it made unreadable.
+trap 'chmod -R u+rwx "$scratch" 2> /dev/null; rm -rf "$scratch"' EXIT
 
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
 export GIT_AUTHOR_NAME=Tester GIT_AUTHOR_EMAIL=tester@invalid GIT_COMMITTER_NAME=Tester GIT_COMMITTER_EMAIL=tester@invalid
