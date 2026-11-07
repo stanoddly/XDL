@@ -19,10 +19,7 @@ add_project_worktree "$worktree" "$pinned_commit"
 in_worktree update-ref "$base_ref" "$pinned_commit"
 in_worktree update-ref "$exported_ref" "$pinned_commit"
 
-patches=()
-while IFS= read -r patch; do
-  patches+=("$patch")
-done < <(list_patches "$patches_dir")
+read_patches "$patches_dir"
 (( ${#patches[@]} > 0 )) || exit 0
 
 if ! am_patches "$worktree" "${patches[@]}"; then

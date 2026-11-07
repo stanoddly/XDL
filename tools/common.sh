@@ -49,9 +49,16 @@ add_project_worktree() {
   git -C "$project_submodule" worktree add --quiet --detach "$1" "$2"
 }
 
-list_patches() {
-  [[ -d "$1" ]] || return 0
-  find "$1" -mindepth 2 -maxdepth 2 -name '*.patch' | LC_ALL=C sort
+# Sets patches to the .patch files one directory below <dir>, sorted by name in C order. A glob runs no other process, so a failed
+# command cannot leave the list empty without an error.
+read_patches() {
+  local LC_ALL=C patch
+  patches=()
+  for patch in "$1"/*/*.patch; do
+    if [[ -f "$patch" ]]; then
+      patches+=("$patch")
+    fi
+  done
 }
 
 am_patches() {

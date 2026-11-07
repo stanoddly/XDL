@@ -289,6 +289,15 @@ git -C "$xdl" clean --quiet -fd -- patches
 require_clean_patches "default project"
 pass "with no argument, the tools use patches/ and build/SDL and leave other projects alone"
 
+# In en_US order, 0001-x-a.patch would come before 0001-x-B.patch, and 0002-x-aa.patch before 0002-x-a-b.patch.
+order=$scratch/order
+mkdir -p "$order/0001-x" "$order/0002-y"
+touch "$order/0001-x/0001-x-B.patch" "$order/0001-x/0001-x-a.patch" "$order/0001-x/0002-x-a-b.patch" "$order/0001-x/0002-x-aa.patch" \
+  "$order/0002-y/0001-y.patch" "$order/0002-y/README.md"
+listed=$(LC_ALL=en_US.UTF-8 bash -c 'source "$1/tools/common.sh"; read_patches "$2"; printf "%s " "${patches[@]##*/}"' _ "$xdl" "$order" 2> /dev/null)
+[[ "$listed" == "0001-x-B.patch 0001-x-a.patch 0002-x-a-b.patch 0002-x-aa.patch 0001-y.patch " ]] || fail "read_patches listed: $listed"
+pass "read_patches lists the patches in C order in any locale"
+
 # Upstreams for update-upstream.sh: SDL has lightweight release tags and a newer prerelease, the satellite an annotated release tag.
 upstream_sdl=$scratch/upstream-sdl
 upstream_satellite=$scratch/upstream-satellite
