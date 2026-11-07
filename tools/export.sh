@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
-# Writes the commits in build/SDL back to patches/. A commit's subject starts with its patch name: "library-name: Rename the library".
+# Writes the commits in build/<project> back to its patch directories. A commit's subject starts with its patch name: "library-name: Rename the library".
+# Usage: tools/export.sh [project]
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
-[[ -e "$worktree/.git" ]] || die "build/SDL does not exist. Run tools/apply.sh first."
+select_project "${1:-SDL}"
+[[ -e "$worktree/.git" ]] || die "build/$project does not exist. Run tools/apply.sh $project first."
+[[ -d "$patches_dir" ]] || die "$patches_name does not exist. Create the patch directory first."
 require_finished_worktree
 base_commit=$(in_worktree rev-parse --verify "$base_ref")
 
-[[ -z "$(in_worktree rev-list --merges "$base_commit..HEAD")" ]] || die "build/SDL contains a merge commit."
+[[ -z "$(in_worktree rev-list --merges "$base_commit..HEAD")" ]] || die "build/$project contains a merge commit."
 
 directories=()
 while IFS= read -r directory; do

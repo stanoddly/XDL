@@ -8,6 +8,8 @@ trap 'rm -rf "$scratch"' EXIT
 
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
 export GIT_AUTHOR_NAME=Tester GIT_AUTHOR_EMAIL=tester@invalid GIT_COMMITTER_NAME=Tester GIT_COMMITTER_EMAIL=tester@invalid
+# The fake submodules, nested ones included, are clones of local paths.
+export GIT_ALLOW_PROTOCOL=file
 
 passed=0
 pass() {
@@ -40,9 +42,10 @@ git -C "$sdl" add .
 git -C "$sdl" commit --quiet -m "SDL base"
 
 git init --quiet "$xdl"
-git -C "$xdl" -c protocol.file.allow=always submodule --quiet add "$sdl" external/SDL
+git -C "$xdl" submodule --quiet add "$sdl" external/SDL
 mkdir -p "$xdl/patches/0001-alpha" "$xdl/patches/0002-beta" "$xdl/tools"
 cp "$tools_source"/*.sh "$xdl/tools/"
+cp "$tools_source/../.gitattributes" "$xdl/"
 echo "alpha readme" > "$xdl/patches/0001-alpha/README.md"
 echo "beta readme" > "$xdl/patches/0002-beta/README.md"
 printf '/build/\n' > "$xdl/.gitignore"
@@ -153,7 +156,7 @@ pass "apply works again after git am --abort"
 printf 'one\ntwo\nthree\nupstream\n' > "$sdl/lines.txt"
 git -C "$sdl" add .
 git -C "$sdl" commit --quiet -m "SDL next"
-git -C "$xdl/external/SDL" -c protocol.file.allow=always fetch --quiet origin
+git -C "$xdl/external/SDL" fetch --quiet origin
 git -C "$xdl/external/SDL" checkout --quiet "$(git -C "$sdl" rev-parse HEAD)"
 git -C "$xdl" add external/SDL
 expect_refusal "apply stops at a conflict after an SDL upgrade" "0001-alpha-Add-four.patch" "$apply"
@@ -173,5 +176,166 @@ range_diff=$("$xdl/tools/range-diff.sh" "$second_series")
 [[ "$range_diff" == *"alpha: Add four"* ]] || fail "range-diff output: $range_diff"
 [[ "$(git -C "$xdl/external/SDL" worktree list | wc -l)" -eq 2 ]] || fail "range-diff left worktrees behind"
 pass "range-diff compares two series"
+
+expect_refusal "apply refuses an unknown project" "not a submodule" "$apply" nobody
+expect_refusal "export refuses an unknown project" "not a submodule" "$export_patches" nobody
+expect_refusal "range-diff refuses an unknown project" "not a submodule" "$xdl/tools/range-diff.sh" HEAD nobody
+
+# A second project, with a vendored codec as a nested submodule.
+before_satellite=$(git -C "$xdl" rev-parse HEAD)
+sdl_head=$(git -C "$worktree" rev-parse HEAD)
+codec=$scratch/codec
+satellite=$scratch/satellite
+git init --quiet "$codec"
+echo "codec" > "$codec/codec.txt"
+git -C "$codec" add .
+git -C "$codec" commit --quiet -m "Codec base"
+git init --quiet "$satellite"
+printf 'left\r\nmiddle\r\nright\r\n' > "$satellite/windows.txt"
+git -C "$satellite" submodule --quiet add "$codec" external/codec
+git -C "$satellite" add .
+git -C "$satellite" commit --quiet -m "Satellite base"
+git -C "$xdl" submodule --quiet add "$satellite" external/SDL_fake
+git -C "$xdl" commit --quiet -m "Add SDL_fake"
+without_series=$(git -C "$xdl" rev-parse HEAD)
+fake_worktree=$xdl/build/SDL_fake
+
+apply_errors=$("$apply" SDL_fake 2>&1 > /dev/null)
+[[ -z "$apply_errors" ]] || fail "apply printed errors for a project with no patch directory: $apply_errors"
+[[ -f "$fake_worktree/windows.txt" ]] || fail "apply did not create the project's worktree"
+pass "apply works for a project with no patch directory"
+expect_refusal "export refuses a project with no patch directory" "patches-SDL_fake does not exist" "$export_patches" SDL_fake
+
+mkdir -p "$xdl/patches-SDL_fake/0001-gamma"
+echo "gamma readme" > "$xdl/patches-SDL_fake/0001-gamma/README.md"
+printf 'left\r\nchanged\r\nright\r\n' > "$fake_worktree/windows.txt"
+git -C "$fake_worktree" add .
+git -C "$fake_worktree" commit --quiet -m "gamma: Change a CRLF file"
+"$export_patches" SDL_fake
+[[ -f "$xdl/patches-SDL_fake/0001-gamma/0001-gamma-Change-a-CRLF-file.patch" ]] || fail "export did not write the project's patch"
+require_clean_patches "exporting another project"
+[[ "$(git -C "$worktree" rev-parse HEAD)" == "$sdl_head" ]] || fail "exporting another project changed build/SDL"
+pass "a project's export leaves SDL's patches and worktree alone"
+
+git -C "$xdl" check-attr text -- patches-SDL_fake/0001-gamma/README.md | grep -q 'text: unset' || fail "patches-SDL_fake has no -text attribute"
+git -C "$xdl" add patches-SDL_fake
+git -C "$xdl" commit --quiet -m "Add gamma"
+"$apply" SDL_fake
+[[ "$(git -C "$fake_worktree" show HEAD:windows.txt | od -c | grep -c '\\r')" -gt 0 ]] || fail "the project's CRLF was lost"
+"$export_patches" SDL_fake
+[[ -z "$(git -C "$xdl" status --porcelain --untracked-files=all -- patches-SDL_fake/)" ]] || fail "the project's round trip changed its patches"
+pass "a project's CRLF patch survives apply and export"
+
+git -C "$fake_worktree" submodule --quiet update --init external/codec
+[[ -f "$fake_worktree/external/codec/codec.txt" ]] || fail "the nested submodule was not fetched"
+# Like vendored zlib, whose build renames a tracked header.
+echo "built" >> "$fake_worktree/external/codec/codec.txt"
+"$export_patches" SDL_fake
+"$apply" SDL_fake
+pass "apply and export work with a changed file in a nested submodule"
+
+git -C "$fake_worktree" submodule --quiet update --init external/codec
+echo "moved" >> "$fake_worktree/external/codec/codec.txt"
+git -C "$fake_worktree/external/codec" add .
+git -C "$fake_worktree/external/codec" commit --quiet -m "Moved"
+expect_refusal "apply refuses a nested submodule on another commit" "uncommitted changes" "$apply" SDL_fake
+git -C "$fake_worktree" submodule --quiet update external/codec
+"$apply" SDL_fake
+
+[[ "$("$xdl/tools/range-diff.sh" "$before_satellite" SDL_fake)" == *"no patch series"* ]] || fail "range-diff from a base without the project"
+[[ "$("$xdl/tools/range-diff.sh" "$without_series" SDL_fake)" == *"no patch series"* ]] || fail "range-diff from a base without patches"
+range_diff=$("$xdl/tools/range-diff.sh" HEAD SDL_fake)
+[[ "$range_diff" == *"gamma: Change a CRLF file"* ]] || fail "the project's range-diff output: $range_diff"
+[[ "$(git -C "$xdl/external/SDL_fake" worktree list | wc -l)" -eq 2 ]] || fail "the project's range-diff left worktrees behind"
+pass "range-diff handles a project"
+
+with_series=$(git -C "$xdl" rev-parse HEAD)
+git -C "$xdl" rm --quiet -r patches-SDL_fake
+git -C "$xdl" commit --quiet -m "Remove gamma"
+[[ "$("$xdl/tools/range-diff.sh" "$with_series" SDL_fake)" == *"HEAD has no patch series"* ]] || fail "range-diff to a HEAD without patches"
+git -C "$xdl" reset --quiet --hard "$with_series"
+pass "range-diff reports a HEAD with no patches"
+
+expect_refusal "range-diff refuses an unknown revision" "Unknown revision: mian" "$xdl/tools/range-diff.sh" mian SDL_fake
+
+printf 'not a patch\n' > "$xdl/patches-SDL_fake/0001-gamma/0000-broken.patch"
+git -C "$xdl" add patches-SDL_fake
+git -C "$xdl" commit --quiet -m "Break gamma"
+expect_refusal "range-diff fails on a patch that does not apply" "does not apply" "$xdl/tools/range-diff.sh" "$with_series" SDL_fake
+[[ "$(git -C "$xdl/external/SDL_fake" worktree list | wc -l)" -eq 2 ]] || fail "the failed range-diff left worktrees behind"
+git -C "$xdl" reset --quiet --hard "$with_series"
+
+git -C "$xdl" submodule --quiet deinit --force external/SDL_fake
+expect_refusal "apply refuses an uninitialized project" "is not initialized" "$apply" SDL_fake
+expect_refusal "range-diff refuses an uninitialized project" "is not initialized" "$xdl/tools/range-diff.sh" HEAD SDL_fake
+git -C "$xdl" submodule --quiet update --init external/SDL_fake
+
+# Without a worktree to compare, only the right default can recreate build/SDL.
+sdl_tree=$(git -C "$worktree" rev-parse 'HEAD^{tree}')
+fake_head=$(git -C "$fake_worktree" rev-parse HEAD)
+git -C "$xdl/external/SDL" worktree remove --force "$worktree"
+"$apply"
+[[ -f "$worktree/lines.txt" ]] || fail "the default project is not SDL"
+[[ "$(git -C "$worktree" rev-parse 'HEAD^{tree}')" == "$sdl_tree" ]] || fail "the default project's tree changed"
+[[ "$("$xdl/tools/range-diff.sh" HEAD)" == *"alpha: Add four"* ]] || fail "range-diff's default project is not SDL"
+commit_change lines.txt default "beta: Prove the default"
+"$export_patches"
+[[ -f "$xdl/patches/0002-beta/0002-beta-Prove-the-default.patch" ]] || fail "export's default project is not SDL"
+[[ "$(git -C "$fake_worktree" rev-parse HEAD)" == "$fake_head" ]] || fail "the default project changed build/SDL_fake"
+[[ -z "$(git -C "$xdl" status --porcelain --untracked-files=all -- patches-SDL_fake/)" ]] || fail "the default project changed patches-SDL_fake"
+git -C "$xdl" checkout --quiet -- patches
+git -C "$xdl" clean --quiet -fd -- patches
+"$apply"
+require_clean_patches "default project"
+pass "with no argument, the tools use patches/ and build/SDL and leave other projects alone"
+
+if [[ "$(uname)" == Linux ]]; then
+  check_dependencies="$xdl/tools/check-dependencies.sh"
+  libraries=$scratch/libraries
+  mkdir -p "$libraries"
+  echo 'void placeholder(void) {}' > "$libraries/placeholder.c"
+  # Links <file> with the soname <soname> against the given libraries, even though it uses none of their symbols.
+  link_library() {
+    local file=$1 soname=$2
+    shift 2
+    gcc -shared -o "$libraries/$file" "-Wl,-soname,$soname" "$libraries/placeholder.c" "-L$libraries" -Wl,--no-as-needed "$@"
+  }
+  link_library libXDL3.so libXDL3.so.0
+  link_library libSDL3.so libSDL3.so.0
+  link_library libfake.so libfake.so
+  link_library libXDL3_good.so libXDL3_good.so.0 -lXDL3
+  link_library libXDL3_undeclared.so libXDL3_undeclared.so.0 -lXDL3 -lfake
+  link_library libXDL3_stock.so libXDL3_stock.so.0 -lXDL3 -lSDL3
+  link_library libXDL3_alone.so libXDL3_alone.so.0
+
+  "$check_dependencies" "$libraries/libXDL3.so" > /dev/null
+  "$check_dependencies" "$libraries/libXDL3_good.so" > /dev/null
+  pass "check-dependencies accepts XDL3 and a library that needs it"
+  expect_refusal "check-dependencies refuses an undeclared library" "libfake.so, which is not on the allowlist" "$check_dependencies" "$libraries/libXDL3_undeclared.so"
+  expect_refusal "check-dependencies refuses stock SDL" "needs stock SDL: libSDL3.so.0" "$check_dependencies" "$libraries/libXDL3_stock.so"
+  expect_refusal "check-dependencies refuses a library without XDL3" "does not need XDL3" "$check_dependencies" "$libraries/libXDL3_alone.so"
+
+  mkdir -p "$libraries/empty"
+  link_library empty/libXDL3.so libXDL3.so.0 -nostdlib
+  expect_refusal "check-dependencies refuses an empty dependency list" "could not be read" "$check_dependencies" "$libraries/empty/libXDL3.so"
+
+  # A stand-in for otool, which prints the file it is given as that library's dependencies. The first line is the install name.
+  mkdir -p "$libraries/bin"
+  cat > "$libraries/bin/otool" <<'EOF'
+#!/usr/bin/env bash
+echo "$2:"
+if [[ "$1" == -D ]]; then
+  sed -n 1p "$2"
+else
+  sed 's/^\(.*\)$/\t\1 (compatibility version 1.0.0, current version 1.0.0)/' "$2"
+fi
+EOF
+  chmod +x "$libraries/bin/otool"
+  printf '%s\n' @rpath/libXDL3_image.0.dylib @rpath/libXDL3.0.dylib /usr/lib/libSystem.B.dylib /System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation > "$libraries/libXDL3_image.dylib"
+  printf '%s\n' @rpath/libXDL3_stock.0.dylib @rpath/libSDL3.0.dylib > "$libraries/libXDL3_stock.dylib"
+  PATH="$libraries/bin:$PATH" "$check_dependencies" "$libraries/libXDL3_image.dylib" > /dev/null
+  pass "check-dependencies reads otool output"
+  expect_refusal "check-dependencies refuses a dylib that needs stock SDL" "needs stock SDL: @rpath/libSDL3.0.dylib" env "PATH=$libraries/bin:$PATH" "$check_dependencies" "$libraries/libXDL3_stock.dylib"
+fi
 
 echo "$passed checks passed"
