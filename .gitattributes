@@ -1,2 +1,3 @@
 patches*/** -text
 *.sh text eol=lf
+XDL_VERSION text eol=lf
