@@ -49,11 +49,16 @@ add_project_worktree() {
   git -C "$project_submodule" worktree add --quiet --detach "$1" "$2"
 }
 
-# Sets patches to the .patch files one directory below <dir>, sorted by name in C order. A glob runs no other process, so a failed
-# command cannot leave the list empty without an error.
+# Sets patches to the .patch files one directory below <dir>, sorted by name in C order. It runs no other process, and a glob over a
+# directory it cannot read matches nothing, so it checks that every directory is readable. A missing <dir> gives an empty list.
 read_patches() {
-  local LC_ALL=C patch
+  local LC_ALL=C directory patch
   patches=()
+  [[ -e "$1" ]] || return 0
+  [[ -d "$1" && -r "$1" && -x "$1" ]] || die "Cannot read $1."
+  for directory in "$1"/*/; do
+    [[ ! -d "$directory" ]] || [[ -r "$directory" && -x "$directory" ]] || die "Cannot read ${directory%/}."
+  done
   for patch in "$1"/*/*.patch; do
     if [[ -f "$patch" ]]; then
       patches+=("$patch")

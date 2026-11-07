@@ -295,8 +295,24 @@ mkdir -p "$order/0001-x" "$order/0002-y"
 touch "$order/0001-x/0001-x-B.patch" "$order/0001-x/0001-x-a.patch" "$order/0001-x/0002-x-a-b.patch" "$order/0001-x/0002-x-aa.patch" \
   "$order/0002-y/0001-y.patch" "$order/0002-y/README.md"
 listed=$(LC_ALL=en_US.UTF-8 bash -c 'source "$1/tools/common.sh"; read_patches "$2"; printf "%s " "${patches[@]##*/}"' _ "$xdl" "$order" 2> /dev/null)
-[[ "$listed" == "0001-x-B.patch 0001-x-a.patch 0002-x-a-b.patch 0002-x-aa.patch 0001-y.patch " ]] || fail "read_patches listed: $listed"
-pass "read_patches lists the patches in C order in any locale"
+# Without en_US.UTF-8, bash sorts in C order anyway, and the check would prove nothing.
+if [[ "$(cd "$order/0001-x" && LC_ALL=en_US.UTF-8 bash -c 'echo *' 2> /dev/null)" == "0001-x-a.patch 0001-x-B.patch 0002-x-aa.patch 0002-x-a-b.patch" ]]; then
+  [[ "$listed" == "0001-x-B.patch 0001-x-a.patch 0002-x-a-b.patch 0002-x-aa.patch 0001-y.patch " ]] || fail "read_patches listed: $listed"
+  pass "read_patches lists the patches in C order in any locale"
+else
+  echo "skipped: read_patches order, because en_US.UTF-8 is not installed"
+fi
+if [[ "$(id -u)" != 0 ]]; then
+  chmod 000 "$order/0002-y"
+  expect_refusal "read_patches refuses a directory it cannot read" "Cannot read $order/0002-y." \
+    bash -c 'source "$1/tools/common.sh"; read_patches "$2"' _ "$xdl" "$order"
+  chmod 755 "$order/0002-y"
+fi
+mkdir -p "$scratch/failing-tar"
+printf '#!/bin/sh\nexit 2\n' > "$scratch/failing-tar/tar"
+chmod +x "$scratch/failing-tar/tar"
+expect_refusal "range-diff refuses a series it cannot extract" "Cannot extract patches of HEAD" \
+  env "PATH=$scratch/failing-tar:$PATH" "$xdl/tools/range-diff.sh" HEAD
 
 # Upstreams for update-upstream.sh: SDL has lightweight release tags and a newer prerelease, the satellite an annotated release tag.
 upstream_sdl=$scratch/upstream-sdl

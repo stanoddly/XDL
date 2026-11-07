@@ -27,7 +27,7 @@ apply_series() {
   pinned_commit=$(git -C "$repo_root" rev-parse "$revision:external/$project")
   add_project_worktree "$target/$project" "$pinned_commit"
   if git -C "$repo_root" cat-file -e "$revision:$patches_name" 2> /dev/null; then
-    git -C "$repo_root" archive "$revision" "$patches_name" | tar -x -C "$target"
+    git -C "$repo_root" archive "$revision" "$patches_name" | tar -x -C "$target" || die "Cannot extract $patches_name of $revision."
     read_patches "$target/$patches_name"
   fi
   if (( ${#patches[@]} > 0 )); then
