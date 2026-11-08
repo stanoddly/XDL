@@ -68,8 +68,9 @@ jobs:
 
       # Each xdl3-<target> artifact holds <rid>/native/, and each zip holds runtimes/<rid>/native/, the layout of a NuGet package. The target
       # is the RID, except for browser-wasm-net11, whose zip holds the .NET RID browser-wasm. The licenses ask for their notices to go with
-      # the binaries, so each zip also holds THIRD-PARTY-NOTICES.txt. The release has a copy to read online.
-      - name: Zip the runtimes
+      # the binaries, so each zip also holds THIRD-PARTY-NOTICES.txt. xdl3-headers.zip holds include/ for every target, and the notices. The
+      # release has a copy of the notices to read online.
+      - name: Zip the runtimes and the headers
         run: |
           mkdir dist
           for artifact in artifacts/xdl3-*; do
@@ -79,6 +80,10 @@ jobs:
             cp artifacts/third-party-notices/THIRD-PARTY-NOTICES.txt "staging/$target/"
             (cd "staging/$target" && zip -q -r "$GITHUB_WORKSPACE/dist/xdl3-$target.zip" runtimes THIRD-PARTY-NOTICES.txt)
           done
+          mkdir -p staging/headers
+          cp -R artifacts/headers/include staging/headers/
+          cp artifacts/third-party-notices/THIRD-PARTY-NOTICES.txt staging/headers/
+          (cd staging/headers && zip -q -r "$GITHUB_WORKSPACE/dist/xdl3-headers.zip" include THIRD-PARTY-NOTICES.txt)
           cp artifacts/third-party-notices/THIRD-PARTY-NOTICES.txt dist/
           ls -l dist
 
@@ -99,9 +104,11 @@ jobs:
               echo "| ${path#external/} | $version | [${commit::7}]($url/commit/$commit) |"
             done
             echo
-            echo "Each zip holds \`runtimes/<rid>/native/\` with XDL3 and the three satellite libraries, and the licenses in \`THIRD-PARTY-NOTICES.txt\`. Load XDL3 before a satellite when you load them by path."
+            echo "Each runtime zip holds \`runtimes/<rid>/native/\` with XDL3 and the three satellite libraries, and the licenses in \`THIRD-PARTY-NOTICES.txt\`. Load XDL3 before a satellite when you load them by path."
             echo
             echo "\`xdl3-browser-wasm-net11.zip\` holds static archives for the .NET 11 browser runtime in \`runtimes/browser-wasm/native/\`, built with Emscripten $EMSCRIPTEN_VERSION and \`-fwasm-exceptions -sWASM_LEGACY_EXCEPTIONS=0\`. They link only into a .NET runtime built with the same Emscripten."
+            echo
+            echo "\`xdl3-headers.zip\` holds the C headers of XDL3 and the satellites in \`include/\`, the same for every target, such as for generating bindings."
           } > release-notes.md
           cat release-notes.md
 

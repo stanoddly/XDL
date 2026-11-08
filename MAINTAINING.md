@@ -30,7 +30,7 @@ Declare it in `include/XDL/XDL.h` with an `XDL_` prefix, and append it to `SDL_d
 
 ## Releases
 
-Merging a pull request that raises `XDL_VERSION` to `main` releases it. The Release workflow builds every target and publishes the GitHub release `v<XDL_VERSION>`. It holds one zip per target with `runtimes/<rid>/native/` and `THIRD-PARTY-NOTICES.txt`, a copy of `THIRD-PARTY-NOTICES.txt` to read online, and notes with each library's tag and commit.
+Merging a pull request that raises `XDL_VERSION` to `main` releases it. The Release workflow builds every target and publishes the GitHub release `v<XDL_VERSION>`. It holds one zip per target with `runtimes/<rid>/native/` and `THIRD-PARTY-NOTICES.txt`, `xdl3-headers.zip` with `include/` from the `linux-x64` job and `THIRD-PARTY-NOTICES.txt`, a copy of `THIRD-PARTY-NOTICES.txt` to read online, and notes with each library's tag and commit.
 
 `XDL_VERSION` is `<SDL version>-<N>`, such as `3.4.20-1`. N starts at 1 for each SDL release. Raise N for any change to what a release contains: the submodules, the patches, the licenses, the build tools, the workflows that build, or `.gitattributes`. `tools/check-version.sh` lists these files. CI fails a pull request that changes one of them while `v<XDL_VERSION>` exists. A change to docs or tests needs no raise and releases nothing.
 
@@ -76,7 +76,7 @@ Review it as the next two sections describe, and push any fix to its branch. Bui
 
 ## Third-party notices
 
-CI's `linux-x64` job runs `tools/third-party-notices.sh` and uploads the result as the `third-party-notices` artifact. The file holds each library's license, the codec licenses that SDL_image and SDL_mixer install, notices copied from single source files, and every copyright line of every compiled source and header. The script finds the compiled files through `ninja -t query` and `ninja -t deps`, so it needs Ninja builds, and it covers only what Linux x64 compiles.
+CI's `linux-x64` job runs `tools/third-party-notices.sh` and uploads the result as the `third-party-notices` artifact. The file holds each library's license, the codec licenses that SDL_image and SDL_mixer install, notices copied from single source files, and every copyright line of every compiled source and header. The script finds the compiled files through `ninja -t query` and `ninja -t deps`, so it needs Ninja builds, and it finds only what Linux x64 compiles. It also adds every public SDL header except `SDL_test*`, because `xdl3-headers.zip` ships them, compiled or not.
 
 The copied notices are a list kept by hand in the script. After a move of SDL or a satellite, compare the before and after files of the section above. A new copyright holder or a new file with a license text points to code to read. Add a `notice` or `notice_file` entry when that code's license asks to keep its notice in copies or documentation and the library's own license does not cover it. Public-domain code and zlib-licensed code need no entry. A notice that moved makes the script fail with "missing or empty"; fix its start and end patterns.
 
