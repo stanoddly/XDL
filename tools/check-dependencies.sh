@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Fails if a published library needs stock SDL, does not need XDL3, or needs a library that its platform's allowlist does not name.
+# A satellite must need XDL3 by its published name, as tools/collect-runtime.sh sets it.
 # Usage: tools/check-dependencies.sh <library file>
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
@@ -20,12 +21,12 @@ is_allowed() {
   case "$name" in
     *.so | *.so.*)
       case "$1" in
-        libXDL3.so.0 | libc.so.6 | libm.so.6 | libdl.so.2 | libpthread.so.0 | librt.so.1 | libgcc_s.so.1 | libstdc++.so.6 | ld-linux-*) return 0 ;;
+        libXDL3.so | libc.so.6 | libm.so.6 | libdl.so.2 | libpthread.so.0 | librt.so.1 | libgcc_s.so.1 | libstdc++.so.6 | ld-linux-*) return 0 ;;
       esac
       ;;
     *.dylib)
       case "$1" in
-        @rpath/libXDL3.0.dylib | /usr/lib/* | /System/Library/*) return 0 ;;
+        @loader_path/libXDL3.dylib | /usr/lib/* | /System/Library/*) return 0 ;;
       esac
       ;;
     *.dll)

@@ -1,8 +1,7 @@
 /*
- * Loads XDL3 and then each satellite from one directory, by the file names XDL publishes, and decodes a PNG through XDL3_image.
- * A satellite needs XDL3 by its soname or install name, which differs from the published file name, so this proves that the loader
- * reuses the XDL3 already loaded.
- * Usage: runtime-layout <directory> <expected start of SDL_GetRevision()>
+ * Loads <first library> and then the others from one directory, by the file names XDL publishes, and decodes a PNG through XDL3_image.
+ * A satellite loaded first must find XDL3 in its own directory. On Linux and macOS, every library must also share one copy of XDL3.
+ * Usage: runtime-layout <directory> <expected start of SDL_GetRevision()> <first library: XDL3, XDL3_image, XDL3_ttf or XDL3_mixer>
  */
 #include <SDL3/SDL.h>
 #include <stdio.h>
@@ -13,7 +12,18 @@
 #define LIBRARY_PREFIX ""
 #define LIBRARY_SUFFIX ".dll"
 typedef HMODULE library;
-static library load_library(const char *path) { return LoadLibraryA(path); }
+/* As .NET loads a library by path: the DLL's own directory comes first in the search for its dependencies. That needs backslashes. */
+static library load_library(const char *path)
+{
+    char native[4096];
+    size_t i;
+
+    for (i = 0; path[i] && i < sizeof(native) - 1; i++) {
+        native[i] = path[i] == '/' ? '\\' : path[i];
+    }
+    native[i] = '\0';
+    return LoadLibraryExA(native, NULL, LOAD_WITH_ALTERED_SEARCH_PATH);
+}
 static void *find_symbol(library handle, const char *name) { return (void *)GetProcAddress(handle, name); }
 static void print_load_error(const char *path) { fprintf(stderr, "cannot load %s: error %lu\n", path, GetLastError()); }
 #else
@@ -39,6 +49,7 @@ static const unsigned char png[] = {
 };
 
 static const char *directory;
+static const char *const names[] = { "XDL3", "XDL3_image", "XDL3_ttf", "XDL3_mixer" };
 
 static library load(const char *name)
 {
@@ -64,7 +75,8 @@ static void *find(library handle, const char *name)
 
 int main(int argc, char **argv)
 {
-    library xdl, image, ttf, mixer;
+    library handles[4], xdl, image, ttf, mixer;
+    int first, i;
     const char *(SDLCALL *get_revision)(void);
     SDL_IOStream *(SDLCALL *io_from_const_mem)(const void *, size_t);
     bool (SDLCALL *read_surface_pixel)(SDL_Surface *, int, int, Uint8 *, Uint8 *, Uint8 *, Uint8 *);
@@ -76,15 +88,26 @@ int main(int argc, char **argv)
     Uint8 left[4], right[4];
     bool pixels_read;
 
-    if (argc != 3) {
-        fprintf(stderr, "usage: runtime-layout <directory> <expected start of SDL_GetRevision()>\n");
+    for (first = 0; argc == 4 && first < 4 && strcmp(argv[3], names[first]) != 0; first++) {
+    }
+    if (argc != 4 || first == 4) {
+        fprintf(stderr, "usage: runtime-layout <directory> <expected start of SDL_GetRevision()> <XDL3, XDL3_image, XDL3_ttf or XDL3_mixer>\n");
         return 2;
     }
     directory = argv[1];
 
-    if (!(xdl = load("XDL3")) || !(image = load("XDL3_image")) || !(ttf = load("XDL3_ttf")) || !(mixer = load("XDL3_mixer"))) {
+    if (!(handles[first] = load(names[first]))) {
         return 1;
     }
+    for (i = 0; i < 4; i++) {
+        if (i != first && !(handles[i] = load(names[i]))) {
+            return 1;
+        }
+    }
+    xdl = handles[0];
+    image = handles[1];
+    ttf = handles[2];
+    mixer = handles[3];
 
     get_revision = (const char *(SDLCALL *)(void))find(xdl, "SDL_GetRevision");
     io_from_const_mem = (SDL_IOStream *(SDLCALL *)(const void *, size_t))find(xdl, "SDL_IOFromConstMem");
@@ -125,6 +148,6 @@ int main(int argc, char **argv)
     }
     destroy_surface(surface);
 
-    printf("%s, SDL_ttf %d, SDL_mixer %d: loaded from %s\n", get_revision(), ttf_version(), mix_version(), directory);
+    printf("%s, SDL_ttf %d, SDL_mixer %d: loaded from %s, %s first\n", get_revision(), ttf_version(), mix_version(), directory, names[first]);
     return 0;
 }
