@@ -495,6 +495,11 @@ EOF
       -Wl,--no-as-needed -lXDL3
     ln -s "lib$library.so.0.1.0" "$linux_prefix/lib/lib$library.so.0"
   done
+  mkdir -p "$libraries/old-patchelf"
+  printf '#!/usr/bin/env bash\necho "patchelf 0.14.3"\n' > "$libraries/old-patchelf/patchelf"
+  chmod +x "$libraries/old-patchelf/patchelf"
+  expect_refusal "collect-runtime refuses patchelf 0.14.3" "patchelf 0.14.3 is older than 0.19" env "PATH=$libraries/old-patchelf:$PATH" \
+    "$collect_runtime" linux-x64 "$linux_prefix" "$scratch/runtime/old-patchelf"
   linux=$scratch/runtime/linux
   "$collect_runtime" linux-x64 "$linux_prefix" "$linux" > /dev/null
   [[ "$(ls "$linux" | LC_ALL=C sort | tr '\n' ' ')" == "libXDL3.so libXDL3_image.so libXDL3_mixer.so libXDL3_ttf.so " && ! -L "$linux/libXDL3_ttf.so" ]] \

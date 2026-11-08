@@ -16,7 +16,13 @@ out_dir=$3
 satellites=(XDL3_image XDL3_ttf XDL3_mixer)
 
 case "$rid" in
-  linux-*) command -v patchelf > /dev/null || die "No patchelf on PATH." ;;
+  linux-*)
+    # patchelf 0.14.3, Ubuntu 22.04's, mixes up the names and writes libraries that crash on load. XDL tests 0.19.3.
+    command -v patchelf > /dev/null || die "No patchelf on PATH. Run: pipx install patchelf==0.19.3.0"
+    patchelf_version=$(patchelf --version | awk '{ print $2 }')
+    IFS=. read -r major minor _ <<< "$patchelf_version"
+    (( major > 0 || minor >= 19 )) || die "patchelf $patchelf_version is older than 0.19. Run: pipx install patchelf==0.19.3.0"
+    ;;
   osx-*) command -v install_name_tool > /dev/null && command -v codesign > /dev/null || die "No install_name_tool or codesign on PATH." ;;
   win-*|browser-*) ;;
   *) die "Unknown RID: $rid" ;;
