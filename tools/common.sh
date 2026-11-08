@@ -32,7 +32,7 @@ require_project_submodule() {
   [[ -e "$project_submodule/.git" ]] || die "external/$project is not initialized. Run: git submodule update --init external/$project"
 }
 
-# Ignores files changed inside a nested submodule, because vendored zlib renames a tracked header when it is built. A nested submodule on another commit still counts.
+# Ignores files changed inside a nested submodule, because a vendored library's build can change its tracked files, as vendored zlib's did. A nested submodule on another commit still counts.
 require_finished_worktree() {
   local state
   for state in rebase-apply rebase-merge; do
@@ -49,9 +49,31 @@ add_project_worktree() {
   git -C "$project_submodule" worktree add --quiet --detach "$1" "$2"
 }
 
-list_patches() {
-  [[ -d "$1" ]] || return 0
-  find "$1" -mindepth 2 -maxdepth 2 -name '*.patch' | LC_ALL=C sort
+# Sets patches to the .patch files one directory below <dir>, sorted by name in C order. It runs no other process, and a glob over a
+# directory it cannot read matches nothing, so it checks that every directory is readable. A missing <dir> gives an empty list.
+read_patches() {
+  local LC_ALL=C directory patch
+  patches=()
+  [[ -e "$1" ]] || return 0
+  [[ -d "$1" && -r "$1" && -x "$1" ]] || die "Cannot read $1."
+  for directory in "$1"/*/; do
+    [[ ! -d "$directory" ]] || [[ -r "$directory" && -x "$directory" ]] || die "Cannot read ${directory%/}."
+  done
+  for patch in "$1"/*/*.patch; do
+    if [[ -f "$patch" ]]; then
+      patches+=("$patch")
+    fi
+  done
+}
+
+# Sets version to the content of XDL_VERSION, such as 3.4.20-1, sdl_version to its SDL version and suffix to its -N suffix. Only
+# final newlines may follow it, because the release workflow uses the file as it is. No number has a leading zero, which bash
+# arithmetic would read as octal.
+read_version() {
+  version=$(< "$repo_root/XDL_VERSION")
+  [[ "$version" =~ ^((0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*))-([1-9][0-9]*)$ ]] || die "XDL_VERSION must look like 3.4.20-1, not: $version"
+  sdl_version=${BASH_REMATCH[1]}
+  suffix=${BASH_REMATCH[5]}
 }
 
 am_patches() {

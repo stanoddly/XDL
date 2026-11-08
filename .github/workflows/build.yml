@@ -3,9 +3,8 @@ name: Build
 on:
   workflow_dispatch:
   pull_request:
-
-env:
-  XDL_VERSION: 3.4.20-1
+  # Release runs this workflow before it publishes the artifacts.
+  workflow_call:
 
 jobs:
   tooling:
@@ -19,6 +18,13 @@ jobs:
           fetch-depth: 0
           submodules: true
 
+      # A run started by hand, such as the update pull request's, compares with main
+      - name: Find the base revision
+        if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+        env:
+          PULL_REQUEST_BASE: ${{ github.event.pull_request.base.sha }}
+        run: echo "BASE_REVISION=${PULL_REQUEST_BASE:-$(git merge-base origin/main HEAD)}" >> "$GITHUB_ENV"
+
       - name: Test the scripts
         run: tests/tooling/run.sh
 
@@ -31,15 +37,20 @@ jobs:
           git diff --exit-code -- 'patches*'
           test -z "$(git status --porcelain --untracked-files=all -- 'patches*')"
 
+      # Also after a failed export, which an upstream move causes even when every patch applies
       - name: Write the range-diffs to the job summary
-        if: github.event_name == 'pull_request'
+        if: ${{ !cancelled() && env.BASE_REVISION != '' }}
         run: |
           for project in SDL SDL_image SDL_ttf SDL_mixer; do
             echo "### $project"
             echo '```'
-            tools/range-diff.sh "${{ github.event.pull_request.base.sha }}" "$project"
+            tools/range-diff.sh "$BASE_REVISION" "$project"
             echo '```'
           done >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Check that a change to a release raises XDL_VERSION
+        if: ${{ !cancelled() && env.BASE_REVISION != '' }}
+        run: tools/check-version.sh "$BASE_REVISION"
 
   webgpu:
     name: WebGPU
@@ -91,8 +102,7 @@ jobs:
           # SDL's own CI runs no tests on Windows ARM64, and testprocess crashes there in process_testStdinToStdout
           - { rid: win-arm64, os: windows-11-arm, flags: -A ARM64 -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded, ctest: true, ctest_args: -E ^testprocess$ }
           # Cross-compiled on Intel, because jobs for the arm64 macOS runners wait for capacity until GitHub cancels them.
-          # Opus picks its intrinsics from the Intel host, so they are off.
-          - { rid: osx-arm64, os: macos-15-intel, flags: -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0, satellite_flags: -DOPUS_DISABLE_INTRINSICS=ON, ctest: false }
+          - { rid: osx-arm64, os: macos-15-intel, flags: -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0, ctest: false }
           # osx-arm64 binaries cannot run on that runner, so this job runs the macOS tests
           - { rid: osx-x64, os: macos-15-intel, flags: -DCMAKE_OSX_ARCHITECTURES=x86_64 -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0, ctest: true }
 
@@ -106,8 +116,11 @@ jobs:
         with:
           submodules: true
 
-      - name: Set the revision
-        run: echo "XDL_REVISION=SDL-${XDL_VERSION%-*}-${GITHUB_SHA::12}" >> "$GITHUB_ENV"
+      - name: Set the version and revision
+        run: |
+          xdl_version=$(cat XDL_VERSION)
+          echo "XDL_VERSION=$xdl_version" >> "$GITHUB_ENV"
+          echo "XDL_REVISION=SDL-${xdl_version%-*}-${GITHUB_SHA::12}" >> "$GITHUB_ENV"
 
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
@@ -120,8 +133,6 @@ jobs:
             libx11-dev libxcursor-dev libxext-dev libxi-dev libxinerama-dev libxkbcommon-dev libxrandr-dev libxss-dev \
             libxt-dev libxv-dev libxxf86vm-dev libdrm-dev libgbm-dev libpipewire-0.3-dev libdecor-0-dev libjack-dev \
             libusb-1.0-0-dev
-          # Vendored libtiff in SDL_image would link this if its patch broke
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y libjbig-dev
 
       - name: Apply patches
         run: for project in SDL SDL_image SDL_ttf SDL_mixer; do tools/apply.sh "$project"; done
@@ -152,7 +163,7 @@ jobs:
           cmake --build build/consumer --config Release
 
       - name: Build the satellite libraries
-        run: for project in SDL_image SDL_ttf SDL_mixer; do tools/build-project.sh "$project" build/install ${{ matrix.flags }} ${{ matrix.satellite_flags }}; done
+        run: for project in SDL_image SDL_ttf SDL_mixer; do tools/build-project.sh "$project" build/install ${{ matrix.flags }}; done
 
       - name: Collect the runtime
         run: tools/collect-runtime.sh "${{ matrix.rid }}" build/install "runtimes/${{ matrix.rid }}/native"

@@ -22,15 +22,13 @@ trap remove_scratch EXIT
 
 # Prints the range of the applied series, as <project commit>..<last patch>. It runs in a command substitution, where set -e is off, so a failed patch has to exit by itself.
 apply_series() {
-  local revision=$1 target=$scratch/$2 patch patches=()
+  local revision=$1 target=$scratch/$2 patches=()
   local pinned_commit
   pinned_commit=$(git -C "$repo_root" rev-parse "$revision:external/$project")
   add_project_worktree "$target/$project" "$pinned_commit"
   if git -C "$repo_root" cat-file -e "$revision:$patches_name" 2> /dev/null; then
-    git -C "$repo_root" archive "$revision" "$patches_name" | tar -x -C "$target"
-    while IFS= read -r patch; do
-      patches+=("$patch")
-    done < <(list_patches "$target/$patches_name")
+    git -C "$repo_root" archive "$revision" "$patches_name" | tar -x -C "$target" || die "Cannot extract $patches_name of $revision."
+    read_patches "$target/$patches_name"
   fi
   if (( ${#patches[@]} > 0 )); then
     am_patches "$target/$project" "${patches[@]}" >&2 || die "The patch series of $revision does not apply."

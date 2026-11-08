@@ -4,7 +4,8 @@ set -euo pipefail
 
 tools_source=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../tools" && pwd)
 scratch=$(mktemp -d)
-trap 'rm -rf "$scratch"' EXIT
+# A failed check can leave a folder it made unreadable.
+trap 'chmod -R u+rwx "$scratch" 2> /dev/null; rm -rf "$scratch"' EXIT
 
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
 export GIT_AUTHOR_NAME=Tester GIT_AUTHOR_EMAIL=tester@invalid GIT_COMMITTER_NAME=Tester GIT_COMMITTER_EMAIL=tester@invalid
@@ -228,7 +229,7 @@ pass "a project's CRLF patch survives apply and export"
 
 git -C "$fake_worktree" submodule --quiet update --init external/codec
 [[ -f "$fake_worktree/external/codec/codec.txt" ]] || fail "the nested submodule was not fetched"
-# Like vendored zlib, whose build renames a tracked header.
+# Like vendored zlib, whose build renamed a tracked header.
 echo "built" >> "$fake_worktree/external/codec/codec.txt"
 "$export_patches" SDL_fake
 "$apply" SDL_fake
@@ -288,6 +289,105 @@ git -C "$xdl" clean --quiet -fd -- patches
 "$apply"
 require_clean_patches "default project"
 pass "with no argument, the tools use patches/ and build/SDL and leave other projects alone"
+
+# In en_US order, 0001-x-a.patch would come before 0001-x-B.patch, and 0002-x-aa.patch before 0002-x-a-b.patch.
+order=$scratch/order
+mkdir -p "$order/0001-x" "$order/0002-y"
+touch "$order/0001-x/0001-x-B.patch" "$order/0001-x/0001-x-a.patch" "$order/0001-x/0002-x-a-b.patch" "$order/0001-x/0002-x-aa.patch" \
+  "$order/0002-y/0001-y.patch" "$order/0002-y/README.md"
+listed=$(LC_ALL=en_US.UTF-8 bash -c 'source "$1/tools/common.sh"; read_patches "$2"; printf "%s " "${patches[@]##*/}"' _ "$xdl" "$order" 2> /dev/null)
+# Without en_US.UTF-8, bash sorts in C order anyway, and the check would prove nothing.
+if [[ "$(cd "$order/0001-x" && LC_ALL=en_US.UTF-8 bash -c 'echo *' 2> /dev/null)" == "0001-x-a.patch 0001-x-B.patch 0002-x-aa.patch 0002-x-a-b.patch" ]]; then
+  [[ "$listed" == "0001-x-B.patch 0001-x-a.patch 0002-x-a-b.patch 0002-x-aa.patch 0001-y.patch " ]] || fail "read_patches listed: $listed"
+  pass "read_patches lists the patches in C order in any locale"
+else
+  echo "skipped: read_patches order, because en_US.UTF-8 is not installed"
+fi
+if [[ "$(id -u)" != 0 ]]; then
+  chmod 000 "$order/0002-y"
+  expect_refusal "read_patches refuses a directory it cannot read" "Cannot read $order/0002-y." \
+    bash -c 'source "$1/tools/common.sh"; read_patches "$2"' _ "$xdl" "$order"
+  chmod 755 "$order/0002-y"
+fi
+mkdir -p "$scratch/failing-tar"
+printf '#!/bin/sh\nexit 2\n' > "$scratch/failing-tar/tar"
+chmod +x "$scratch/failing-tar/tar"
+expect_refusal "range-diff refuses a series it cannot extract" "Cannot extract patches of HEAD" \
+  env "PATH=$scratch/failing-tar:$PATH" "$xdl/tools/range-diff.sh" HEAD
+
+# Upstreams for update-upstream.sh: SDL has lightweight release tags and a newer prerelease, the satellite an annotated release tag.
+upstream_sdl=$scratch/upstream-sdl
+upstream_satellite=$scratch/upstream-satellite
+release=$scratch/release
+upstream_commit() {
+  git -C "$1" commit --quiet --allow-empty -m "$2"
+  git -C "$1" tag "$2"
+}
+git init --quiet "$upstream_sdl"
+upstream_commit "$upstream_sdl" release-3.4.9
+upstream_commit "$upstream_sdl" release-3.4.10
+upstream_commit "$upstream_sdl" prerelease-3.5.0
+git init --quiet "$upstream_satellite"
+upstream_commit "$upstream_satellite" release-3.2.2
+git init --quiet "$release"
+mkdir -p "$release/tools"
+cp "$tools_source"/*.sh "$release/tools/"
+cp "$tools_source/../.gitattributes" "$release/"
+git -C "$release" submodule --quiet add "$upstream_sdl" external/SDL
+git -C "$release" submodule --quiet add "$upstream_satellite" external/SDL_fake
+git -C "$release/external/SDL" checkout --quiet release-3.4.9
+echo 3.4.9-1 > "$release/XDL_VERSION"
+git -C "$release" add .
+git -C "$release" commit --quiet -m "Set up"
+update_upstream="$release/tools/update-upstream.sh"
+check_version="$release/tools/check-version.sh"
+
+summary=$("$update_upstream")
+[[ "$(head -n 1 <<< "$summary")" == "Update to SDL release-3.4.10, SDL_fake release-3.2.2" ]] || fail "update-upstream: unexpected title in: $summary"
+[[ "$(git -C "$release" rev-parse :external/SDL)" == "$(git -C "$upstream_sdl" rev-parse release-3.4.10)" ]] \
+  || fail "update-upstream did not move SDL to release-3.4.10"
+[[ "$(git -C "$release" show :XDL_VERSION)" == 3.4.10-1 ]] || fail "update-upstream: XDL_VERSION is not 3.4.10-1 after an SDL release"
+pass "update-upstream moves SDL to its newest release by number, skips prereleases and restarts the suffix"
+git -C "$release" commit --quiet -m "Update"
+[[ -z "$("$update_upstream")" ]] && git -C "$release" diff --cached --quiet && git -C "$release" diff --quiet -- XDL_VERSION \
+  || fail "update-upstream changed something with nothing to move"
+pass "update-upstream does nothing when every project is on its newest release"
+
+git -C "$upstream_satellite" commit --quiet --allow-empty -m "Satellite release"
+git -C "$upstream_satellite" tag -a release-3.2.3 -m "Satellite release"
+"$update_upstream" > /dev/null
+[[ "$(git -C "$release" rev-parse :external/SDL_fake)" == "$(git -C "$upstream_satellite" rev-parse 'release-3.2.3^{commit}')" ]] \
+  || fail "update-upstream did not move SDL_fake to the commit of an annotated tag"
+[[ "$(git -C "$release" show :XDL_VERSION)" == 3.4.10-2 ]] || fail "update-upstream: XDL_VERSION is not 3.4.10-2 after a satellite release"
+pass "update-upstream raises the suffix for a satellite release and reads annotated tags"
+git -C "$release" commit --quiet -m "Update the satellite"
+
+"$check_version" HEAD~1 > /dev/null
+pass "check-version accepts a version without a tag"
+git -C "$release" tag v3.4.10-2
+echo "notes" > "$release/NOTES.md"
+git -C "$release" add NOTES.md
+git -C "$release" commit --quiet -m "Add notes"
+"$check_version" HEAD~1 > /dev/null
+pass "check-version accepts a change that is not a release input"
+mkdir -p "$release/patches-SDL_fake/0001-change"
+echo "change readme" > "$release/patches-SDL_fake/0001-change/README.md"
+git -C "$release" add patches-SDL_fake
+git -C "$release" commit --quiet -m "Add a patch"
+expect_refusal "check-version refuses a released version with changed release inputs" "patches-SDL_fake/0001-change/README.md" "$check_version" v3.4.10-2
+echo 3.4.10-3 > "$release/XDL_VERSION"
+git -C "$release" commit --quiet -am "Raise the version"
+"$check_version" v3.4.10-2 > /dev/null
+pass "check-version accepts the change once the suffix is raised"
+expect_refusal "check-version refuses an unknown revision" "Unknown revision: v9" "$check_version" v9
+printf '3.4.10 -3\n' > "$release/XDL_VERSION"
+expect_refusal "check-version refuses a version with a space inside" "XDL_VERSION must look like 3.4.20-1, not: 3.4.10 -3" "$check_version" HEAD
+printf '3.4.10-08\n' > "$release/XDL_VERSION"
+expect_refusal "check-version refuses a suffix with a leading zero" "XDL_VERSION must look like 3.4.20-1, not: 3.4.10-08" "$check_version" HEAD
+printf '3.4.10-3\n\n' > "$release/XDL_VERSION"
+"$check_version" HEAD > /dev/null
+pass "check-version accepts a version followed by empty lines"
+git -C "$release" checkout --quiet -- XDL_VERSION
 
 collect_runtime="$xdl/tools/collect-runtime.sh"
 prefix=$scratch/prefix

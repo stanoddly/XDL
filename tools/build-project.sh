@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Fetches a satellite's vendored codecs, then builds it in build/cmake-<satellite> and installs it, against the XDL3 in <install prefix>.
+# Fetches a satellite's vendored libraries, then builds it in build/cmake-<satellite> and installs it, against the XDL3 in <install prefix>.
 # Run tools/apply.sh <satellite> first. The codecs are the ones XDL publishes.
 # Usage: tools/build-project.sh <satellite> <install prefix> [extra CMake flags]
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
@@ -13,24 +13,35 @@ shift 2
 # Each list holds what its flags need, so a change to one is a change to the other.
 case "$project" in
   SDL_image)
-    vendored=(external/zlib external/libpng external/libtiff external/libwebp)
-    flags=(-DSDLIMAGE_VENDORED=ON -DSDLIMAGE_DEPS_SHARED=OFF -DSDLIMAGE_AVIF=OFF -DSDLIMAGE_SAMPLES=OFF -DSDLIMAGE_STRICT=ON)
+    # PNG goes through SDL's own code. The formats that need a library are off: animated PNG, TIFF, WebP and AVIF. ImageIO is off, because
+    # on macOS it would load those formats and more, so a game tested there would fail elsewhere.
+    vendored=()
+    flags=(-DSDLIMAGE_VENDORED=ON -DSDLIMAGE_DEPS_SHARED=OFF -DSDLIMAGE_BACKEND_IMAGEIO=OFF -DSDLIMAGE_PNG_LIBPNG=OFF -DSDLIMAGE_TIF=OFF
+      -DSDLIMAGE_WEBP=OFF -DSDLIMAGE_AVIF=OFF -DSDLIMAGE_SAMPLES=OFF -DSDLIMAGE_STRICT=ON)
     ;;
   SDL_ttf)
-    vendored=(external/freetype external/harfbuzz external/plutosvg external/plutovg)
-    flags=(-DSDLTTF_VENDORED=ON -DSDLTTF_HARFBUZZ=ON -DSDLTTF_PLUTOSVG=ON -DSDLTTF_SAMPLES=OFF -DSDLTTF_STRICT=ON -DCMAKE_POLICY_VERSION_MINIMUM=3.5)
+    # Without plutosvg, fonts with SVG color glyphs, such as some emoji fonts, draw no such glyphs.
+    vendored=(external/freetype external/harfbuzz)
+    flags=(-DSDLTTF_VENDORED=ON -DSDLTTF_HARFBUZZ=ON -DSDLTTF_PLUTOSVG=OFF -DSDLTTF_SAMPLES=OFF -DSDLTTF_STRICT=ON -DCMAKE_POLICY_VERSION_MINIMUM=3.5)
     ;;
   SDL_mixer)
-    vendored=(external/flac external/ogg external/vorbis external/opus external/opusfile external/libxmp external/wavpack)
-    # GME is off because it would link LGPL code statically into a zlib-licensed library.
-    flags=(-DSDLMIXER_VENDORED=ON -DSDLMIXER_DEPS_SHARED=OFF -DSDLMIXER_MP3_MPG123=OFF -DSDLMIXER_GME=OFF -DSDLMIXER_TESTS=OFF -DSDLMIXER_EXAMPLES=OFF -DSDLMIXER_STRICT=ON)
+    # FLAC, Ogg Vorbis and MP3 go through the decoders in SDL_mixer's own source: dr_flac, stb_vorbis and dr_mp3. The formats that need a
+    # library are off: Opus, WavPack and tracker music. MIDI is off, because Timidity needs instrument files that XDL does not ship. GME
+    # is off because it would link LGPL code statically into a zlib-licensed library.
+    vendored=()
+    flags=(-DSDLMIXER_VENDORED=ON -DSDLMIXER_DEPS_SHARED=OFF -DSDLMIXER_FLAC_LIBFLAC=OFF -DSDLMIXER_VORBIS_VORBISFILE=OFF -DSDLMIXER_MP3_MPG123=OFF
+      -DSDLMIXER_OPUS=OFF -DSDLMIXER_WAVPACK=OFF -DSDLMIXER_MOD=OFF -DSDLMIXER_MIDI=OFF -DSDLMIXER_GME=OFF -DSDLMIXER_TESTS=OFF -DSDLMIXER_EXAMPLES=OFF
+      -DSDLMIXER_STRICT=ON)
     ;;
   *)
     die "$project is not a satellite library."
     ;;
 esac
 
-in_worktree submodule --quiet update --init --depth 1 "${vendored[@]}"
+# Bash 3.2 rejects an empty array under set -u, and git would fetch every submodule without paths.
+if (( ${#vendored[@]} > 0 )); then
+  in_worktree submodule --quiet update --init --depth 1 "${vendored[@]}"
+fi
 
 mkdir -p "$install_prefix"
 install_prefix=$(cd "$install_prefix" && pwd)
