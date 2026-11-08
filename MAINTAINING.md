@@ -32,7 +32,7 @@ Declare it in `include/XDL/XDL.h` with an `XDL_` prefix, and append it to `SDL_d
 
 Merging a pull request that raises `XDL_VERSION` to `main` releases it. The Release workflow builds every RID and publishes the GitHub release `v<XDL_VERSION>`. It holds one zip per RID with `runtimes/<rid>/native/` and `THIRD-PARTY-NOTICES.txt`, a copy of `THIRD-PARTY-NOTICES.txt` to read online, and notes with each library's tag and commit.
 
-`XDL_VERSION` is `<SDL version>-<N>`, such as `3.4.20-1`. N starts at 1 for each SDL release. Raise N for any change to what a release contains: the submodules, the patches, the licenses, the build tools or the workflows that build. `tools/check-version.sh` lists these files. CI fails a pull request that changes one of them while `v<XDL_VERSION>` exists. A change to docs or tests needs no raise and releases nothing.
+`XDL_VERSION` is `<SDL version>-<N>`, such as `3.4.20-1`. N starts at 1 for each SDL release. Raise N for any change to what a release contains: the submodules, the patches, the licenses, the build tools, the workflows that build, or `.gitattributes`. `tools/check-version.sh` lists these files. CI fails a pull request that changes one of them while `v<XDL_VERSION>` exists. A change to docs or tests needs no raise and releases nothing.
 
 A failed release publishes nothing. Fix the cause, then run Release by hand on `main`. If two pull requests raised `XDL_VERSION` to the same value, Release fails after the second one. Raise N again to release it.
 

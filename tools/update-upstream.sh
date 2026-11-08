@@ -9,10 +9,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 (( $# == 0 )) || die "usage: update-upstream.sh"
 cd "$repo_root"
 
-version=$(tr -d '[:space:]' < XDL_VERSION)
-[[ "$version" =~ ^([0-9]+\.[0-9]+\.[0-9]+)-([0-9]+)$ ]] || die "XDL_VERSION must look like 3.4.20-1, not: $version"
-sdl_version=${BASH_REMATCH[1]}
-suffix=${BASH_REMATCH[2]}
+read_version
 
 # Prints the tag names in <ls-remote output> that name <commit>, without the refs/tags/ prefix and the ^{} suffix.
 tag_names() {

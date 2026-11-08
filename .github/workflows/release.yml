@@ -37,6 +37,8 @@ jobs:
             # A change since the tag would never be released, as when two pull requests raised XDL_VERSION to the same value.
             tools/check-version.sh "$tag"
           else
+            # Fails on a malformed XDL_VERSION. With HEAD as the base, no release input counts as changed.
+            tools/check-version.sh HEAD
             echo "tag=$tag" >> "$GITHUB_OUTPUT"
           fi
 

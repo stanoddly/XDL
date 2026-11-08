@@ -66,6 +66,16 @@ read_patches() {
   done
 }
 
+# Sets version to the content of XDL_VERSION, such as 3.4.20-1, sdl_version to its SDL version and suffix to its -N suffix. Only
+# final newlines may follow it, because the release workflow uses the file as it is. No number has a leading zero, which bash
+# arithmetic would read as octal.
+read_version() {
+  version=$(< "$repo_root/XDL_VERSION")
+  [[ "$version" =~ ^((0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*))-([1-9][0-9]*)$ ]] || die "XDL_VERSION must look like 3.4.20-1, not: $version"
+  sdl_version=${BASH_REMATCH[1]}
+  suffix=${BASH_REMATCH[5]}
+}
+
 am_patches() {
   local target=$1
   shift

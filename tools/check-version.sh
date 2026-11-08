@@ -8,12 +8,12 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 base_revision=$1
 git -C "$repo_root" rev-parse --verify --quiet "$base_revision^{commit}" > /dev/null || die "Unknown revision: $base_revision"
 
-# Everything that changes what a release contains. build.yml is here because its matrix flags change the binaries.
-release_inputs=(XDL_VERSION LICENSE LICENSES external 'patches*' tools/apply.sh tools/common.sh tools/build-project.sh tools/collect-runtime.sh
+# Everything that changes what a release contains. build.yml is here because its matrix flags change the binaries, and .gitattributes
+# because it decides how the patches are checked out.
+release_inputs=(XDL_VERSION .gitattributes LICENSE LICENSES external 'patches*' tools/apply.sh tools/common.sh tools/build-project.sh tools/collect-runtime.sh
   tools/third-party-notices.sh .github/workflows/build.yml .github/workflows/release.yml)
 
-version=$(tr -d '[:space:]' < "$repo_root/XDL_VERSION")
-[[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+-[0-9]+$ ]] || die "XDL_VERSION must look like 3.4.20-1, not: $version"
+read_version
 tag=v$version
 
 if ! git -C "$repo_root" rev-parse --verify --quiet "refs/tags/$tag" > /dev/null; then

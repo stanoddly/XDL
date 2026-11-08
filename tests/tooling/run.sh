@@ -380,6 +380,14 @@ git -C "$release" commit --quiet -am "Raise the version"
 "$check_version" v3.4.10-2 > /dev/null
 pass "check-version accepts the change once the suffix is raised"
 expect_refusal "check-version refuses an unknown revision" "Unknown revision: v9" "$check_version" v9
+printf '3.4.10 -3\n' > "$release/XDL_VERSION"
+expect_refusal "check-version refuses a version with a space inside" "XDL_VERSION must look like 3.4.20-1, not: 3.4.10 -3" "$check_version" HEAD
+printf '3.4.10-08\n' > "$release/XDL_VERSION"
+expect_refusal "check-version refuses a suffix with a leading zero" "XDL_VERSION must look like 3.4.20-1, not: 3.4.10-08" "$check_version" HEAD
+printf '3.4.10-3\n\n' > "$release/XDL_VERSION"
+"$check_version" HEAD > /dev/null
+pass "check-version accepts a version followed by empty lines"
+git -C "$release" checkout --quiet -- XDL_VERSION
 
 collect_runtime="$xdl/tools/collect-runtime.sh"
 prefix=$scratch/prefix
