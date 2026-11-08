@@ -63,7 +63,8 @@ jobs:
         with:
           path: artifacts
 
-      # Each xdl3-<rid> artifact holds <rid>/native/, and each zip holds runtimes/<rid>/native/, the layout of a NuGet package.
+      # Each xdl3-<rid> artifact holds <rid>/native/, and each zip holds runtimes/<rid>/native/, the layout of a NuGet package. The licenses
+      # ask for their notices to go with the binaries, so each zip also holds THIRD-PARTY-NOTICES.txt. The release has a copy to read online.
       - name: Zip the runtimes
         run: |
           mkdir dist
@@ -71,7 +72,8 @@ jobs:
             rid=${artifact#artifacts/xdl3-}
             mkdir -p "staging/$rid/runtimes"
             cp -R "$artifact/$rid" "staging/$rid/runtimes/"
-            (cd "staging/$rid" && zip -q -r "$GITHUB_WORKSPACE/dist/xdl3-$rid.zip" runtimes)
+            cp artifacts/third-party-notices/THIRD-PARTY-NOTICES.txt "staging/$rid/"
+            (cd "staging/$rid" && zip -q -r "$GITHUB_WORKSPACE/dist/xdl3-$rid.zip" runtimes THIRD-PARTY-NOTICES.txt)
           done
           cp artifacts/third-party-notices/THIRD-PARTY-NOTICES.txt dist/
           ls -l dist
@@ -93,7 +95,7 @@ jobs:
               echo "| ${path#external/} | $version | [${commit::7}]($url/commit/$commit) |"
             done
             echo
-            echo "Each zip holds \`runtimes/<rid>/native/\` with XDL3 and the three satellite libraries. Load XDL3 before a satellite when you load them by path. Licenses: \`THIRD-PARTY-NOTICES.txt\`."
+            echo "Each zip holds \`runtimes/<rid>/native/\` with XDL3 and the three satellite libraries, and the licenses in \`THIRD-PARTY-NOTICES.txt\`. Load XDL3 before a satellite when you load them by path."
           } > release-notes.md
           cat release-notes.md
 
