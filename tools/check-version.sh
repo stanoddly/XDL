@@ -10,7 +10,7 @@ git -C "$repo_root" rev-parse --verify --quiet "$base_revision^{commit}" > /dev/
 
 # Everything that changes what a release contains. build.yml is here because its matrix flags change the binaries, and .gitattributes
 # because it decides how the patches are checked out.
-release_inputs=(XDL_VERSION .gitattributes LICENSE LICENSES external 'patches*' tools/apply.sh tools/common.sh tools/build-project.sh tools/collect-runtime.sh
+release_inputs=(XDL_VERSION .gitattributes LICENSE LICENSES external 'patches*' tools/apply.sh tools/common.sh tools/build-project.sh tools/build-browser.sh tools/emsdk-env.sh tools/collect-runtime.sh
   tools/third-party-notices.sh .github/workflows/build.yml .github/workflows/release.yml)
 
 read_version

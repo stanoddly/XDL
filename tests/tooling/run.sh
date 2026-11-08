@@ -396,6 +396,7 @@ for library in XDL3 XDL3_image XDL3_ttf XDL3_mixer; do
   echo "$library" > "$prefix/lib/lib$library.so.0.1.0"
   ln -s "lib$library.so.0.1.0" "$prefix/lib/lib$library.so.0"
   echo "$library" > "$prefix/bin/$library.dll"
+  echo "$library" > "$prefix/lib/lib$library.a"
 done
 "$collect_runtime" linux-x64 "$prefix" "$scratch/runtime/linux" > /dev/null
 [[ "$(ls "$scratch/runtime/linux" | LC_ALL=C sort | tr '\n' ' ')" == "libXDL3.so libXDL3_image.so libXDL3_mixer.so libXDL3_ttf.so " ]] \
@@ -407,6 +408,10 @@ pass "collect-runtime copies the Linux libraries under their published names"
 [[ "$(ls "$scratch/runtime/windows" | LC_ALL=C sort | tr '\n' ' ')" == "XDL3.dll XDL3_image.dll XDL3_mixer.dll XDL3_ttf.dll " ]] \
   || fail "collect-runtime: unexpected Windows files: $(ls "$scratch/runtime/windows")"
 pass "collect-runtime copies the Windows libraries"
+"$collect_runtime" browser-wasm "$prefix" "$scratch/runtime/browser" > /dev/null
+[[ "$(ls "$scratch/runtime/browser" | LC_ALL=C sort | tr '\n' ' ')" == "XDL3.a XDL3_image.a XDL3_mixer.a XDL3_ttf.a " ]] \
+  || fail "collect-runtime: unexpected browser files: $(ls "$scratch/runtime/browser")"
+pass "collect-runtime copies the browser archives without the lib prefix"
 expect_refusal "collect-runtime refuses an unknown RID" "Unknown RID: android-arm64" "$collect_runtime" android-arm64 "$prefix" "$scratch/runtime/android"
 expect_refusal "collect-runtime refuses a missing library" "lib/libXDL3.0.dylib does not exist" "$collect_runtime" osx-arm64 "$prefix" "$scratch/runtime/osx"
 

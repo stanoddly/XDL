@@ -43,6 +43,27 @@ compiled_files XDL3 build/cmake SDL3-shared
 compiled_files XDL3_image build/cmake-SDL_image SDL3_image-shared
 compiled_files XDL3_ttf build/cmake-SDL_ttf SDL3_ttf-shared
 compiled_files XDL3_mixer build/cmake-SDL_mixer SDL3_mixer-shared
+# Only the browser build compiles SDL's Emscripten backends, the generic and dummy ones it falls back to, and XDL's WebGPU backend.
+# Every checkout has their sources, so they are added here. Each listed directory must have sources, so a move fails. The glob also
+# takes in a new Emscripten backend. The satellites compile the same sources in both builds.
+browser_sources=()
+for directory in gpu/webgpu audio/emscripten camera/emscripten filesystem/emscripten joystick/emscripten locale/emscripten main/emscripten \
+  misc/emscripten power/emscripten sensor/emscripten video/emscripten haptic/dummy process/dummy thread/generic tray/dummy; do
+  found=""
+  for file in "$repo_real/build/SDL/src/$directory"/*; do
+    if [[ -f "$file" ]]; then
+      browser_sources+=("$file")
+      found=1
+    fi
+  done
+  [[ -n "$found" ]] || die "build/SDL/src/$directory has no sources. Update the browser backends in this script."
+done
+for file in "$repo_real"/build/SDL/src/*/emscripten/*; do
+  if [[ -f "$file" ]]; then
+    browser_sources+=("$file")
+  fi
+done
+printf '%s\n' "${browser_sources[@]}" | sort -u - "$lists/XDL3.sources" -o "$lists/XDL3.sources"
 
 # Writes one section. An empty text fails like a missing one, so an update cannot drop a notice silently.
 section() {
@@ -124,7 +145,7 @@ freetype_acknowledgment="Portions of this software are copyright © $freetype_ye
   printf 'Licenses and notices for XDL3 and its satellite libraries XDL3_image, XDL3_ttf and XDL3_mixer. XDL3_ttf also contains FreeType\n'
   printf 'and HarfBuzz. Below are the license of each library, the FreeType acknowledgment, the notices of third-party code whose license\n'
   printf 'the library'"'"'s own does not cover, and the copyright lines of every source and header compiled into each library, from the Linux\n'
-  printf 'x64 build.\n\n'
+  printf 'x64 build and the browser build.\n\n'
 
   notice_file "XDL license" LICENSE
   notice_file "SDL license (XDL3)" build/SDL/LICENSE.txt
@@ -155,6 +176,9 @@ freetype_acknowledgment="Portions of this software are copyright © $freetype_ye
   # The Direct3D 12 headers in src/video/directx come from microsoft/DirectX-Headers and name its MIT license without its text.
   # Only Windows builds compile them, so the Linux search does not find them.
   notice_file "SDL: Direct3D 12 headers from DirectX-Headers, in the Windows builds (XDL3)" LICENSES/DirectX-Headers-MIT.txt
+  # The WebGPU backend compiles against webgpu.h of Emscripten's emdawnwebgpu port, which carries this license. Only the browser build
+  # has the port, so the repo keeps a copy of the text, and that build checks that the header still carries it.
+  notice_file "XDL: WebGPU header of Emscripten's emdawnwebgpu port, in the browser build (XDL3)" LICENSES/webgpu-native-BSD-3-Clause.txt
   # The generated Wayland protocol code carries the license of each protocol's XML. pointer-gestures has no notice.
   for protocol in alpha-modifier-v1 color-management-v1 cursor-shape-v1 fractional-scale-v1 frog-color-management-v1 idle-inhibit-unstable-v1 \
     input-timestamps-unstable-v1 keyboard-shortcuts-inhibit-unstable-v1 pointer-constraints-unstable-v1 pointer-warp-v1 primary-selection-unstable-v1 \

@@ -5,6 +5,10 @@ on:
   pull_request:
   # Release runs this workflow before it publishes the artifacts.
   workflow_call:
+    outputs:
+      emscripten-version:
+        description: The Emscripten that built the browser archives.
+        value: ${{ jobs.browser.outputs.emscripten-version }}
 
 jobs:
   tooling:
@@ -52,15 +56,25 @@ jobs:
         if: ${{ !cancelled() && env.BASE_REVISION != '' }}
         run: tools/check-version.sh "$BASE_REVISION"
 
-  webgpu:
-    name: WebGPU
+  # The archives link only into a .NET runtime built with the same Emscripten, the one of .NET 11's wasm-tools workload. The zip keeps the
+  # .NET RID browser-wasm inside, and a later .NET gets a target of its own.
+  browser:
+    name: browser-wasm-net11
     runs-on: ubuntu-24.04
+    outputs:
+      emscripten-version: ${{ steps.emscripten.outputs.version }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           submodules: true
+
+      - name: Set the version and revision
+        run: |
+          xdl_version=$(cat XDL_VERSION)
+          echo "XDL_VERSION=$xdl_version" >> "$GITHUB_ENV"
+          echo "XDL_REVISION=SDL-${xdl_version%-*}-${GITHUB_SHA::12}" >> "$GITHUB_ENV"
 
       # tools/emsdk-env.sh uses the Emscripten of this workload.
       - name: Install the .NET 11 preview SDK
@@ -72,6 +86,14 @@ jobs:
       - name: Install the wasm-tools workload
         run: dotnet workload install wasm-tools
 
+      - name: Find the Emscripten version
+        id: emscripten
+        run: |
+          source tools/emsdk-env.sh
+          version=$(emcc --version | head -n 1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n 1)
+          [[ -n "$version" ]] || { echo "No version in the first line of emcc --version" >&2; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
       - name: Install Chromium and a software Vulkan driver
         run: |
           sudo apt-get update
@@ -80,13 +102,37 @@ jobs:
           (cd build/node && npm init -y > /dev/null && npm install playwright-core@1.63.0 --no-audit --no-fund)
           build/node/node_modules/.bin/playwright-core install --with-deps chromium
 
-      - name: Build and run the smoke test
+      - name: Apply patches
+        run: for project in SDL SDL_image SDL_ttf SDL_mixer; do tools/apply.sh "$project"; done
+
+      - name: Build and run the WebGPU smoke test
         run: |
-          tools/apply.sh
           source tools/emsdk-env.sh
           emcmake cmake -S tests/webgpu -B build/webgpu-test -DCMAKE_BUILD_TYPE=Release
           cmake --build build/webgpu-test --parallel "$(nproc)"
           tests/webgpu/run-test.sh
+
+      - name: Build
+        run: |
+          source tools/emsdk-env.sh
+          tools/build-browser.sh build/install "-DSDL_VENDOR_INFO=XDL-$XDL_VERSION" "-DSDL_REVISION=$XDL_REVISION"
+
+      - name: Collect the runtime
+        run: tools/collect-runtime.sh browser-wasm build/install runtimes/browser-wasm/native
+
+      # In a shell without emsdk-env.sh, with a cache of its own: a .NET link into the cache that emsdk-env.sh uses emptied it once.
+      - name: Link the archives into a .NET browser app
+        run: |
+          dotnet publish tests/browser-dotnet -c Release -o build/dotnet-link "-p:XdlArchiveDirectory=$PWD/runtimes/browser-wasm/native" \
+            "-p:WasmCachePath=$PWD/build/dotnet-em-cache"
+          node tests/browser-dotnet/run.mjs build/dotnet-link/wwwroot
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: xdl3-browser-wasm-net11
+          path: runtimes
+          if-no-files-found: error
 
   build:
     name: ${{ matrix.rid }}
@@ -197,7 +243,7 @@ jobs:
         if: matrix.rid == 'linux-x64'
         run: tools/third-party-notices.sh build/install build/THIRD-PARTY-NOTICES.txt
 
-      # Its own artifact, so every xdl3-<rid> artifact has the same layout
+      # Its own artifact, so every xdl3-<target> artifact has the same layout
       - name: Upload the third-party notices
         if: matrix.rid == 'linux-x64'
         uses: actions/upload-artifact@v4

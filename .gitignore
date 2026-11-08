@@ -1,1 +1,3 @@
 /build/
+tests/browser-dotnet/bin/
+tests/browser-dotnet/obj/
