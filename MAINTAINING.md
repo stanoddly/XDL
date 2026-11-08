@@ -30,7 +30,7 @@ Declare it in `include/XDL/XDL.h` with an `XDL_` prefix, and append it to `SDL_d
 
 ## Releases
 
-Merging a pull request that raises `XDL_VERSION` to `main` releases it. The Release workflow builds every RID and publishes the GitHub release `v<XDL_VERSION>`. It holds one zip per RID with `runtimes/<rid>/native/` and `THIRD-PARTY-NOTICES.txt`, a copy of `THIRD-PARTY-NOTICES.txt` to read online, and notes with each library's tag and commit.
+Merging a pull request that raises `XDL_VERSION` to `main` releases it. The Release workflow builds every target and publishes the GitHub release `v<XDL_VERSION>`. It holds one zip per target with `runtimes/<rid>/native/` and `THIRD-PARTY-NOTICES.txt`, a copy of `THIRD-PARTY-NOTICES.txt` to read online, and notes with each library's tag and commit.
 
 `XDL_VERSION` is `<SDL version>-<N>`, such as `3.4.20-1`. N starts at 1 for each SDL release. Raise N for any change to what a release contains: the submodules, the patches, the licenses, the build tools, the workflows that build, or `.gitattributes`. `tools/check-version.sh` lists these files. CI fails a pull request that changes one of them while `v<XDL_VERSION>` exists. A change to docs or tests needs no raise and releases nothing.
 
@@ -80,7 +80,15 @@ CI's `linux-x64` job runs `tools/third-party-notices.sh` and uploads the result 
 
 The copied notices are a list kept by hand in the script. After a move of SDL or a satellite, compare the before and after files of the section above. A new copyright holder or a new file with a license text points to code to read. Add a `notice` or `notice_file` entry when that code's license asks to keep its notice in copies or documentation and the library's own license does not cover it. Public-domain code and zlib-licensed code need no entry. A notice that moved makes the script fail with "missing or empty"; fix its start and end patterns.
 
-Other platforms compile some sources that Linux x64 does not, such as Windows and macOS backends. Read their license headers by hand when a move touches them.
+Other platforms compile some sources that Linux x64 does not, such as Windows and macOS backends. Read their license headers by hand when a move touches them. The browser build is covered in part: the script adds the sources of SDL's Emscripten backends, the generic and dummy ones it falls back to, and XDL's WebGPU backend by directory, and `LICENSES/webgpu-native-BSD-3-Clause.txt` holds the license of emdawnwebgpu's `webgpu.h`.
+
+## .NET and Emscripten
+
+- The `browser-wasm-net11` job installs the newest .NET 11 preview SDK, so its Emscripten can change between two releases without a commit. The release notes name the Emscripten version.
+- Emscripten pins the Dawn version of the emdawnwebgpu port, so a new Emscripten can change the `webgpu.h` that the WebGPU backend compiles against. A compile error in `SDL_gpu_webgpu.c` after a .NET update is the first sign. `tools/build-browser.sh` fails when the header's license text no longer matches `LICENSES/webgpu-native-BSD-3-Clause.txt`.
+- The exception flags in `tools/build-browser.sh`, `-fwasm-exceptions -sWASM_LEGACY_EXCEPTIONS=0`, match the .NET runtime's. Change them, and the release notes in `release.yml`, if .NET changes its exception handling.
+- A new .NET major version needs a target of its own, such as `browser-wasm-net12`: a copy of the job with its `dotnet-version` and artifact name, and a `TargetFramework` for `tests/browser-dotnet`.
+- Keep the link test's `WasmCachePath` apart from the cache that `emsdk-env.sh` sets. A .NET link into that cache emptied it once, emdawnwebgpu port included, and the next build failed.
 
 ## Marking a build
 

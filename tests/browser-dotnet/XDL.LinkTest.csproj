@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk.WebAssembly">
+    <!--
+      Links the release archives into the .NET browser runtime and binds every library through its P/Invoke module.
+      dotnet publish tests/browser-dotnet -c Release -o build/dotnet-link -p:XdlArchiveDirectory=<directory of XDL3.a> -p:WasmCachePath=<writable Emscripten cache, not the one of emsdk-env.sh>
+      node tests/browser-dotnet/run.mjs build/dotnet-link/wwwroot
+    -->
+    <PropertyGroup>
+        <TargetFramework>net11.0</TargetFramework>
+        <OutputType>Exe</OutputType>
+        <Nullable>enable</Nullable>
+        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+        <EmccExtraLDFlags>--use-port=emdawnwebgpu</EmccExtraLDFlags>
+        <_XdlArchiveDirectory>$([MSBuild]::EnsureTrailingSlash('$(XdlArchiveDirectory)'))</_XdlArchiveDirectory>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <NativeFileReference Include="$(_XdlArchiveDirectory)XDL3.a;$(_XdlArchiveDirectory)XDL3_image.a;$(_XdlArchiveDirectory)XDL3_mixer.a;$(_XdlArchiveDirectory)XDL3_ttf.a" />
+    </ItemGroup>
+
+    <Target Name="_RequireXdlArchiveDirectory" BeforeTargets="BeforeBuild" Condition="'$(XdlArchiveDirectory)' == ''">
+        <Error Text="Set XdlArchiveDirectory to the directory tools/collect-runtime.sh copied the browser archives to." />
+    </Target>
+</Project>

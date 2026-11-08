@@ -1,10 +1,17 @@
 #!/usr/bin/env bash
-# Fetches a satellite's vendored libraries, then builds it in build/cmake-<satellite> and installs it, against the XDL3 in <install prefix>.
-# Run tools/apply.sh <satellite> first. The codecs are the ones XDL publishes.
-# Usage: tools/build-project.sh <satellite> <install prefix> [extra CMake flags]
+# Fetches a satellite's vendored libraries, then builds it in <build dir>, by default build/cmake-<satellite>, and installs it, against
+# the XDL3 in <install prefix>. Run tools/apply.sh <satellite> first. The codecs are the ones XDL publishes.
+# Usage: tools/build-project.sh [--build-dir <build dir>] <satellite> <install prefix> [extra CMake flags]
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
-(( $# >= 2 )) || die "usage: build-project.sh <satellite> <install prefix> [extra CMake flags]"
+usage="usage: build-project.sh [--build-dir <build dir>] <satellite> <install prefix> [extra CMake flags]"
+build_dir=""
+if [[ "${1:-}" == --build-dir ]]; then
+  (( $# >= 2 )) || die "$usage"
+  build_dir=$2
+  shift 2
+fi
+(( $# >= 2 )) || die "$usage"
 select_project "$1"
 install_prefix=$2
 shift 2
@@ -45,7 +52,7 @@ fi
 
 mkdir -p "$install_prefix"
 install_prefix=$(cd "$install_prefix" && pwd)
-build_dir=$repo_root/build/cmake-$project
+build_dir=${build_dir:-$repo_root/build/cmake-$project}
 
 # A bare --parallel gives make no job limit, and vendored HarfBuzz is a heavy compile.
 jobs=$(nproc 2> /dev/null || sysctl -n hw.ncpu)
