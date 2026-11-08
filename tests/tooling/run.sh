@@ -487,7 +487,7 @@ EOF
   # Real libraries as the install names them: a satellite needs libXDL3.so.0 and has no RUNPATH.
   linux_prefix=$scratch/prefix-linux
   mkdir -p "$linux_prefix/lib"
-  gcc -shared -o "$linux_prefix/lib/libXDL3.so.0.1.0" -Wl,-soname,libXDL3.so.0 "$libraries/placeholder.c"
+  gcc -shared -o "$linux_prefix/lib/libXDL3.so.0.1.0" -Wl,-soname,libXDL3.so.0 "$libraries/placeholder.c" -Wl,--no-as-needed
   ln -s libXDL3.so.0.1.0 "$linux_prefix/lib/libXDL3.so.0"
   ln -s libXDL3.so.0 "$linux_prefix/lib/libXDL3.so"
   for library in XDL3_image XDL3_ttf XDL3_mixer; do
