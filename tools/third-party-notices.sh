@@ -46,13 +46,13 @@ compiled_files XDL3_mixer build/cmake-SDL_mixer SDL3_mixer-shared
 # Only the browser build compiles SDL's Emscripten backends, the generic and dummy ones it falls back to, and XDL's WebGPU backend.
 # Every checkout has their sources, so they are added here. Each listed directory must have sources, so a move fails. The glob also
 # takes in a new Emscripten backend. The satellites compile the same sources in both builds.
-browser_sources=()
+extra_sources=()
 for directory in gpu/webgpu audio/emscripten camera/emscripten filesystem/emscripten joystick/emscripten locale/emscripten main/emscripten \
   misc/emscripten power/emscripten sensor/emscripten video/emscripten haptic/dummy process/dummy thread/generic tray/dummy; do
   found=""
   for file in "$repo_real/build/SDL/src/$directory"/*; do
     if [[ -f "$file" ]]; then
-      browser_sources+=("$file")
+      extra_sources+=("$file")
       found=1
     fi
   done
@@ -60,10 +60,18 @@ for directory in gpu/webgpu audio/emscripten camera/emscripten filesystem/emscri
 done
 for file in "$repo_real"/build/SDL/src/*/emscripten/*; do
   if [[ -f "$file" ]]; then
-    browser_sources+=("$file")
+    extra_sources+=("$file")
   fi
 done
-printf '%s\n' "${browser_sources[@]}" | sort -u - "$lists/XDL3.sources" -o "$lists/XDL3.sources"
+# xdl3-headers.zip holds SDL's public headers without SDL_test, and Linux x64 does not compile all of them, such as the OpenGL ES 2 headers.
+# The satellites compile all of their public headers.
+for file in "$repo_real"/build/SDL/include/SDL3/*.h; do
+  case "$file" in
+    */SDL_test*) ;;
+    *) extra_sources+=("$file") ;;
+  esac
+done
+printf '%s\n' "${extra_sources[@]}" | sort -u - "$lists/XDL3.sources" -o "$lists/XDL3.sources"
 
 # Writes one section. An empty text fails like a missing one, so an update cannot drop a notice silently.
 section() {
@@ -145,7 +153,7 @@ freetype_acknowledgment="Portions of this software are copyright © $freetype_ye
   printf 'Licenses and notices for XDL3 and its satellite libraries XDL3_image, XDL3_ttf and XDL3_mixer. XDL3_ttf also contains FreeType\n'
   printf 'and HarfBuzz. Below are the license of each library, the FreeType acknowledgment, the notices of third-party code whose license\n'
   printf 'the library'"'"'s own does not cover, and the copyright lines of every source and header compiled into each library, from the Linux\n'
-  printf 'x64 build and the browser build.\n\n'
+  printf 'x64 build and the browser build, and of every header in xdl3-headers.zip.\n\n'
 
   notice_file "XDL license" LICENSE
   notice_file "SDL license (XDL3)" build/SDL/LICENSE.txt
@@ -171,8 +179,12 @@ freetype_acknowledgment="Portions of this software are copyright © $freetype_ye
   notice "SDL: XDG user directory lookup (XDL3)" build/SDL/src/filesystem/unix/SDL_sysfilesystem.c 'Copyright \(c\) 2007 Red Hat, Inc\.' '^  SOFTWARE\.$'
   notice "SDL: Mesa OpenGL header (XDL3)" build/SDL/include/SDL3/SDL_opengl.h 'Copyright \(C\) 1999-2006  Brian Paul' 'OTHER DEALINGS IN THE SOFTWARE\.$'
   notice "SDL: Khronos platform header (XDL3)" build/SDL/include/SDL3/SDL_egl.h 'Copyright \(c\) 2008-2018 The Khronos Group Inc\.' 'OTHER DEALINGS IN THE MATERIALS\.$'
-  # The Vulkan headers in src/video/khronos and the EGL part of SDL_egl.h are Apache-2.0, and no pinned source carries its text.
-  notice_file "SDL: Khronos Vulkan and EGL headers, under the Apache License 2.0 (XDL3)" LICENSES/Apache-2.0.txt
+  # The Vulkan headers in src/video/khronos, the EGL part of SDL_egl.h and SDL_opengles2_gl2platform.h are Apache-2.0, and no pinned
+  # source carries its text.
+  notice_file "SDL: Khronos Vulkan, EGL and OpenGL ES 2 platform headers, under the Apache License 2.0 (XDL3)" LICENSES/Apache-2.0.txt
+  # SDL_opengl_glext.h, SDL_opengles2_gl2.h and SDL_opengles2_gl2ext.h name the MIT license without its text, so the repo keeps the
+  # SPDX text with their copyright line.
+  notice_file "SDL: Khronos OpenGL and OpenGL ES 2 headers, under the MIT License (XDL3)" LICENSES/Khronos-MIT.txt
   # The Direct3D 12 headers in src/video/directx come from microsoft/DirectX-Headers and name its MIT license without its text.
   # Only Windows builds compile them, so the Linux search does not find them.
   notice_file "SDL: Direct3D 12 headers from DirectX-Headers, in the Windows builds (XDL3)" LICENSES/DirectX-Headers-MIT.txt

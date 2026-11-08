@@ -34,7 +34,7 @@ tools/build-project.sh SDL_image build/install
 
 `build-project.sh` fetches the libraries that the satellite vendors and links them in, so each library needs only XDL3 and system libraries. XDL3_image and XDL3_mixer build only the formats their own source decodes. XDL3_image has no animated PNG, TIFF, WebP or AVIF. XDL3_mixer has no Opus, WavPack, tracker music, MIDI or GME. XDL3_ttf vendors FreeType and HarfBuzz, without plutosvg, so it draws no SVG color glyphs. The function names, headers, CMake targets and pkg-config packages stay those of SDL_image, SDL_ttf and SDL_mixer.
 
-Each [release](https://github.com/stanoddly/XDL/releases) has one zip per platform with `runtimes/<rid>/native/` and the licenses in `THIRD-PARTY-NOTICES.txt`, plus the [browser](#browser) zip. CI also uploads them from every build, as the `xdl3-<target>` and `third-party-notices` artifacts. The file names drop the version, such as `libXDL3_image.so`, while a satellite asks for `libXDL3.so.0`. When you load the libraries by path, load XDL3 first, so the loader finds it already loaded.
+Each [release](https://github.com/stanoddly/XDL/releases) has one zip per platform with `runtimes/<rid>/native/` and the licenses in `THIRD-PARTY-NOTICES.txt`, plus the [browser](#browser) zip. `xdl3-headers.zip` holds the C headers of XDL3 and the satellites in `include/`, which are the same for every target, such as for generating bindings. CI also uploads them from every build, as the `xdl3-<target>`, `headers` and `third-party-notices` artifacts. The file names drop the version, such as `libXDL3_image.so`, while a satellite asks for `libXDL3.so.0`. When you load the libraries by path, load XDL3 first, so the loader finds it already loaded.
 
 ## Browser
 

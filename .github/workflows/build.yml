@@ -243,6 +243,23 @@ jobs:
         if: matrix.rid == 'linux-x64'
         run: tools/third-party-notices.sh build/install build/THIRD-PARTY-NOTICES.txt
 
+      # Every target installs the same headers. No release ships the SDL_test library, so its headers go.
+      - name: Collect the headers
+        if: matrix.rid == 'linux-x64'
+        run: |
+          mkdir -p build/headers
+          cp -R build/install/include build/headers/
+          rm build/headers/include/SDL3/SDL_test*.h
+
+      # Not named xdl3-headers, because Release zips every xdl3-* artifact as a target
+      - name: Upload the headers
+        if: matrix.rid == 'linux-x64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: headers
+          path: build/headers
+          if-no-files-found: error
+
       # Its own artifact, so every xdl3-<target> artifact has the same layout
       - name: Upload the third-party notices
         if: matrix.rid == 'linux-x64'
