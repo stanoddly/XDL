@@ -32,7 +32,7 @@ tools/apply.sh SDL_image
 tools/build-project.sh SDL_image build/install
 ```
 
-`build-project.sh` fetches the codecs that the library vendors and links them in, so each library needs only XDL3 and system libraries. The function names, headers, CMake targets and pkg-config packages stay those of SDL_image, SDL_ttf and SDL_mixer. SDL_mixer's GME codec is off, because it would link LGPL code into the library.
+`build-project.sh` fetches the libraries that the satellite vendors and links them in, so each library needs only XDL3 and system libraries. XDL3_image and XDL3_mixer build only the formats their own source decodes. XDL3_image has no animated PNG, TIFF, WebP or AVIF. XDL3_mixer has no Opus, WavPack, tracker music, MIDI or GME. XDL3_ttf vendors FreeType and HarfBuzz, without plutosvg, so it draws no SVG color glyphs. The function names, headers, CMake targets and pkg-config packages stay those of SDL_image, SDL_ttf and SDL_mixer.
 
 Each [release](https://github.com/stanoddly/XDL/releases) has one zip per platform with `runtimes/<rid>/native/` and the licenses in `THIRD-PARTY-NOTICES.txt`. CI also uploads them from every build, as the `xdl3-<rid>` and `third-party-notices` artifacts. The file names drop the version, such as `libXDL3_image.so`, while a satellite asks for `libXDL3.so.0`. When you load the libraries by path, load XDL3 first, so the loader finds it already loaded.
 

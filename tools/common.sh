@@ -32,7 +32,7 @@ require_project_submodule() {
   [[ -e "$project_submodule/.git" ]] || die "external/$project is not initialized. Run: git submodule update --init external/$project"
 }
 
-# Ignores files changed inside a nested submodule, because vendored zlib renames a tracked header when it is built. A nested submodule on another commit still counts.
+# Ignores files changed inside a nested submodule, because a vendored library's build can change its tracked files, as vendored zlib's did. A nested submodule on another commit still counts.
 require_finished_worktree() {
   local state
   for state in rebase-apply rebase-merge; do

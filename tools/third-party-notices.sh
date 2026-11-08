@@ -60,19 +60,18 @@ notice_file() {
   text=$(cat "$repo_root/$2") || text=""
   section "$1" "$2" "$text"
 }
-# The licenses that SDL_image or SDL_mixer installs for the codecs it builds, such as optional/LICENSE.libpng.txt.
+# The licenses that SDL_image or SDL_mixer installs for the codec libraries it builds, such as optional/LICENSE.libpng.txt. XDL builds
+# none today, so this prints nothing until a codec library is turned on in tools/build-project.sh.
 codec_licenses() {
-  local satellite=$1 library=$2 file found=""
+  local satellite=$1 library=$2 file
   for file in "$install_prefix/share/licenses/SDL3_${satellite#SDL_}/optional"/LICENSE.*.txt; do
     [[ -f "$file" ]] || continue
-    found=1
     file=${file#"$install_prefix/"}
     section "$satellite: $(basename "$file" .txt | sed 's/^LICENSE\.//') license ($library)" "$file" "$(cat "$install_prefix/$file")"
   done
-  [[ -n "$found" ]] || die "$install_prefix/share/licenses/SDL3_${satellite#SDL_}/optional has no codec licenses."
 }
 
-# Prints each given file, or a UTF-8 copy of it if it is not valid UTF-8. Such a file is taken as Latin-1, as libxmp's mkstemp.c is.
+# Prints each given file, or a UTF-8 copy of it if it is not valid UTF-8. Such a file is taken as Latin-1, as libxmp's mkstemp.c was.
 utf8_files() {
   local file copy
   while read -r file; do
@@ -122,11 +121,10 @@ freetype_year=$(grep -m1 -oE 'Copyright \(C\) 1996-[0-9]{4}' "$repo_root/build/S
 freetype_acknowledgment="Portions of this software are copyright © $freetype_year The FreeType Project (www.freetype.org). All rights reserved."
 
 {
-  printf 'Licenses and notices for XDL3 and its satellite libraries XDL3_image, XDL3_ttf and XDL3_mixer. Each satellite also contains the\n'
-  printf 'libraries it vendors: XDL3_image zlib, libpng, libtiff and libwebp; XDL3_ttf FreeType, HarfBuzz, plutosvg and plutovg; XDL3_mixer\n'
-  printf 'FLAC, Ogg, Vorbis, Opus, opusfile, libxmp and WavPack. Below are the license of each library, the FreeType acknowledgment, the\n'
-  printf 'notices of third-party code whose license the library'"'"'s own does not cover, and the copyright lines of every source and header\n'
-  printf 'compiled into each library, from the Linux x64 build.\n\n'
+  printf 'Licenses and notices for XDL3 and its satellite libraries XDL3_image, XDL3_ttf and XDL3_mixer. XDL3_ttf also contains FreeType\n'
+  printf 'and HarfBuzz. Below are the license of each library, the FreeType acknowledgment, the notices of third-party code whose license\n'
+  printf 'the library'"'"'s own does not cover, and the copyright lines of every source and header compiled into each library, from the Linux\n'
+  printf 'x64 build.\n\n'
 
   notice_file "XDL license" LICENSE
   notice_file "SDL license (XDL3)" build/SDL/LICENSE.txt
@@ -137,8 +135,6 @@ freetype_acknowledgment="Portions of this software are copyright © $freetype_ye
   notice_file "FreeType License, the FTL, under which XDL3_ttf uses FreeType" build/SDL_ttf/external/freetype/docs/FTL.TXT
   printf '==== FreeType acknowledgment (XDL3_ttf)\n\n%s\n\n' "$freetype_acknowledgment"
   notice_file "HarfBuzz license (XDL3_ttf)" build/SDL_ttf/external/harfbuzz/COPYING
-  notice_file "plutosvg license (XDL3_ttf)" build/SDL_ttf/external/plutosvg/LICENSE
-  notice_file "plutovg license (XDL3_ttf)" build/SDL_ttf/external/plutovg/LICENSE
   notice_file "SDL_mixer license (XDL3_mixer)" build/SDL_mixer/LICENSE.txt
   codec_licenses SDL_mixer XDL3_mixer
 
@@ -168,7 +164,6 @@ freetype_acknowledgment="Portions of this software are copyright © $freetype_ye
   done
   notice "SDL_image: GIF decoder adapted from XPaint (XDL3_image)" build/SDL_image/src/IMG_gif.c 'Copyright 1990, 1991, 1993 David Koblas' 'provided "as is"'
   notice "SDL_image: QOI codec (XDL3_image)" build/SDL_image/src/qoi.h 'Copyright\(c\) 2021 Dominic Szablewski' '^SOFTWARE\.$'
-  notice "libtiff: hash set (XDL3_image)" build/SDL_image/external/libtiff/libtiff/tif_hash_set.c 'Copyright \(c\) 2008-2009, Even Rouault' 'DEALINGS IN THE SOFTWARE\.$'
   notice "FreeType: BDF driver (XDL3_ttf)" build/SDL_ttf/external/freetype/src/bdf/README '^License$' '^THE USE OR OTHER DEALINGS IN THE SOFTWARE\.$'
   notice "FreeType: PCF driver (XDL3_ttf)" build/SDL_ttf/external/freetype/src/pcf/README '^License$' '^SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE\.$'
   notice "FreeType: PCF bitmap utilities (XDL3_ttf)" build/SDL_ttf/external/freetype/src/pcf/pcfutil.c 'Copyright 1990, 1994, 1998  The Open Group' 'written authorization from The Open Group\.'
@@ -179,9 +174,7 @@ freetype_acknowledgment="Portions of this software are copyright © $freetype_ye
   # No pinned source carries the license of the Unicode data HarfBuzz generates its tables from, so the repo keeps a copy of
   # https://www.unicode.org/license.txt.
   notice_file "HarfBuzz: tables generated from Unicode data (XDL3_ttf)" LICENSES/Unicode-3.0.txt
-  notice_file "SDL_mixer: TiMidity license (XDL3_mixer)" build/SDL_mixer/src/timidity/COPYING
   notice_file "SDL_mixer: dr_libs license (XDL3_mixer)" build/SDL_mixer/src/dr_libs/LICENSE
-  notice "Vorbis: LPC routines (XDL3_mixer)" build/SDL_mixer/external/vorbis/lib/lpc.c 'Copyright 1992, 1993, 1994 by Jutta Degener' '^Carsten Bormann$'
 
   library_copyrights "XDL, including SDL" XDL3 SDL
   library_copyrights "SDL_image" XDL3_image SDL_image

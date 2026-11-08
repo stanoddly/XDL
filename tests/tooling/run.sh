@@ -229,7 +229,7 @@ pass "a project's CRLF patch survives apply and export"
 
 git -C "$fake_worktree" submodule --quiet update --init external/codec
 [[ -f "$fake_worktree/external/codec/codec.txt" ]] || fail "the nested submodule was not fetched"
-# Like vendored zlib, whose build renames a tracked header.
+# Like vendored zlib, whose build renamed a tracked header.
 echo "built" >> "$fake_worktree/external/codec/codec.txt"
 "$export_patches" SDL_fake
 "$apply" SDL_fake

@@ -102,8 +102,7 @@ jobs:
           # SDL's own CI runs no tests on Windows ARM64, and testprocess crashes there in process_testStdinToStdout
           - { rid: win-arm64, os: windows-11-arm, flags: -A ARM64 -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded, ctest: true, ctest_args: -E ^testprocess$ }
           # Cross-compiled on Intel, because jobs for the arm64 macOS runners wait for capacity until GitHub cancels them.
-          # Opus picks its intrinsics from the Intel host, so they are off.
-          - { rid: osx-arm64, os: macos-15-intel, flags: -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0, satellite_flags: -DOPUS_DISABLE_INTRINSICS=ON, ctest: false }
+          - { rid: osx-arm64, os: macos-15-intel, flags: -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0, ctest: false }
           # osx-arm64 binaries cannot run on that runner, so this job runs the macOS tests
           - { rid: osx-x64, os: macos-15-intel, flags: -DCMAKE_OSX_ARCHITECTURES=x86_64 -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0, ctest: true }
 
@@ -134,8 +133,6 @@ jobs:
             libx11-dev libxcursor-dev libxext-dev libxi-dev libxinerama-dev libxkbcommon-dev libxrandr-dev libxss-dev \
             libxt-dev libxv-dev libxxf86vm-dev libdrm-dev libgbm-dev libpipewire-0.3-dev libdecor-0-dev libjack-dev \
             libusb-1.0-0-dev
-          # Vendored libtiff in SDL_image would link this if its patch broke
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y libjbig-dev
 
       - name: Apply patches
         run: for project in SDL SDL_image SDL_ttf SDL_mixer; do tools/apply.sh "$project"; done
@@ -166,7 +163,7 @@ jobs:
           cmake --build build/consumer --config Release
 
       - name: Build the satellite libraries
-        run: for project in SDL_image SDL_ttf SDL_mixer; do tools/build-project.sh "$project" build/install ${{ matrix.flags }} ${{ matrix.satellite_flags }}; done
+        run: for project in SDL_image SDL_ttf SDL_mixer; do tools/build-project.sh "$project" build/install ${{ matrix.flags }}; done
 
       - name: Collect the runtime
         run: tools/collect-runtime.sh "${{ matrix.rid }}" build/install "runtimes/${{ matrix.rid }}/native"

@@ -80,7 +80,7 @@ CI's `linux-x64` job runs `tools/third-party-notices.sh` and uploads the result 
 
 The copied notices are a list kept by hand in the script. After a move of SDL or a satellite, compare the before and after files of the section above. A new copyright holder or a new file with a license text points to code to read. Add a `notice` or `notice_file` entry when that code's license asks to keep its notice in copies or documentation and the library's own license does not cover it. Public-domain code and zlib-licensed code need no entry. A notice that moved makes the script fail with "missing or empty"; fix its start and end patterns.
 
-Other platforms compile some sources that Linux x64 does not, such as Windows and macOS backends and ARM code in libpng and Opus. Read their license headers by hand when a move touches them.
+Other platforms compile some sources that Linux x64 does not, such as Windows and macOS backends. Read their license headers by hand when a move touches them.
 
 ## Marking a build
 
