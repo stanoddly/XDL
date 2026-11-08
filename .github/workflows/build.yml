@@ -29,7 +29,7 @@ jobs:
           PULL_REQUEST_BASE: ${{ github.event.pull_request.base.sha }}
         run: echo "BASE_REVISION=${PULL_REQUEST_BASE:-$(git merge-base origin/main HEAD)}" >> "$GITHUB_ENV"
 
-      # tools/collect-runtime.sh renames the Linux libraries with the patchelf XDL tests. Ubuntu 22.04's corrupts them.
+      # tools/collect-runtime.sh needs patchelf 0.19 or newer. Ubuntu 22.04's 0.14.3 corrupts the libraries.
       - name: Install patchelf
         run: pipx install patchelf==0.19.3.0
 
@@ -183,7 +183,7 @@ jobs:
             libx11-dev libxcursor-dev libxext-dev libxi-dev libxinerama-dev libxkbcommon-dev libxrandr-dev libxss-dev \
             libxt-dev libxv-dev libxxf86vm-dev libdrm-dev libgbm-dev libpipewire-0.3-dev libdecor-0-dev libjack-dev \
             libusb-1.0-0-dev
-          # For tools/collect-runtime.sh: Ubuntu 22.04's patchelf corrupts the libraries.
+          # tools/collect-runtime.sh needs patchelf 0.19 or newer. Ubuntu 22.04's 0.14.3 corrupts the libraries.
           pipx install patchelf==0.19.3.0
 
       - name: Apply patches
@@ -219,6 +219,11 @@ jobs:
 
       - name: Collect the runtime
         run: tools/collect-runtime.sh "${{ matrix.rid }}" build/install "runtimes/${{ matrix.rid }}/native"
+
+      # collect-runtime.sh signs the macOS libraries again, and osx-arm64 runs no tests that would load them
+      - name: Check the signatures
+        if: runner.os == 'macOS'
+        run: codesign --verify --strict --verbose "runtimes/${{ matrix.rid }}/native"/*.dylib
 
       - name: Check the dependencies
         run: |
