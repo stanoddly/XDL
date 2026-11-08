@@ -393,17 +393,9 @@ collect_runtime="$xdl/tools/collect-runtime.sh"
 prefix=$scratch/prefix
 mkdir -p "$prefix/lib" "$prefix/bin"
 for library in XDL3 XDL3_image XDL3_ttf XDL3_mixer; do
-  echo "$library" > "$prefix/lib/lib$library.so.0.1.0"
-  ln -s "lib$library.so.0.1.0" "$prefix/lib/lib$library.so.0"
   echo "$library" > "$prefix/bin/$library.dll"
   echo "$library" > "$prefix/lib/lib$library.a"
 done
-"$collect_runtime" linux-x64 "$prefix" "$scratch/runtime/linux" > /dev/null
-[[ "$(ls "$scratch/runtime/linux" | LC_ALL=C sort | tr '\n' ' ')" == "libXDL3.so libXDL3_image.so libXDL3_mixer.so libXDL3_ttf.so " ]] \
-  || fail "collect-runtime: unexpected Linux files: $(ls "$scratch/runtime/linux")"
-[[ ! -L "$scratch/runtime/linux/libXDL3_ttf.so" && "$(cat "$scratch/runtime/linux/libXDL3_ttf.so")" == XDL3_ttf ]] \
-  || fail "collect-runtime: libXDL3_ttf.so is not a copy of the installed library"
-pass "collect-runtime copies the Linux libraries under their published names"
 "$collect_runtime" win-arm64 "$prefix" "$scratch/runtime/windows" > /dev/null
 [[ "$(ls "$scratch/runtime/windows" | LC_ALL=C sort | tr '\n' ' ')" == "XDL3.dll XDL3_image.dll XDL3_mixer.dll XDL3_ttf.dll " ]] \
   || fail "collect-runtime: unexpected Windows files: $(ls "$scratch/runtime/windows")"
@@ -413,7 +405,33 @@ pass "collect-runtime copies the Windows libraries"
   || fail "collect-runtime: unexpected browser files: $(ls "$scratch/runtime/browser")"
 pass "collect-runtime copies the browser archives without the lib prefix"
 expect_refusal "collect-runtime refuses an unknown RID" "Unknown RID: android-arm64" "$collect_runtime" android-arm64 "$prefix" "$scratch/runtime/android"
-expect_refusal "collect-runtime refuses a missing library" "lib/libXDL3.0.dylib does not exist" "$collect_runtime" osx-arm64 "$prefix" "$scratch/runtime/osx"
+
+# Stand-ins for the macOS tools, which log their arguments.
+macos_tools=$scratch/macos-tools
+mkdir -p "$macos_tools"
+for tool in install_name_tool codesign; do
+  printf '#!/usr/bin/env bash\necho "%s $*" >> "%s/log"\n' "$tool" "$macos_tools" > "$macos_tools/$tool"
+  chmod +x "$macos_tools/$tool"
+done
+expect_refusal "collect-runtime refuses a missing library" "lib/libXDL3.0.dylib does not exist" env "PATH=$macos_tools:$PATH" "$collect_runtime" osx-arm64 "$prefix" "$scratch/runtime/osx"
+mkdir -p "$scratch/prefix-osx/lib"
+for library in XDL3 XDL3_image XDL3_ttf XDL3_mixer; do
+  echo "$library" > "$scratch/prefix-osx/lib/lib$library.0.dylib"
+done
+rm -f "$macos_tools/log"
+PATH="$macos_tools:$PATH" "$collect_runtime" osx-arm64 "$scratch/prefix-osx" "$scratch/runtime/osx" > /dev/null
+osx=$scratch/runtime/osx
+[[ "$(ls "$osx" | LC_ALL=C sort | tr '\n' ' ')" == "libXDL3.dylib libXDL3_image.dylib libXDL3_mixer.dylib libXDL3_ttf.dylib " ]] \
+  || fail "collect-runtime: unexpected macOS files: $(ls "$osx")"
+[[ "$(cat "$macos_tools/log")" == "install_name_tool -id @rpath/libXDL3.dylib $osx/libXDL3.dylib
+install_name_tool -id @rpath/libXDL3_image.dylib -change @rpath/libXDL3.0.dylib @loader_path/libXDL3.dylib $osx/libXDL3_image.dylib
+install_name_tool -id @rpath/libXDL3_ttf.dylib -change @rpath/libXDL3.0.dylib @loader_path/libXDL3.dylib $osx/libXDL3_ttf.dylib
+install_name_tool -id @rpath/libXDL3_mixer.dylib -change @rpath/libXDL3.0.dylib @loader_path/libXDL3.dylib $osx/libXDL3_mixer.dylib
+codesign --force --sign - $osx/libXDL3.dylib
+codesign --force --sign - $osx/libXDL3_image.dylib
+codesign --force --sign - $osx/libXDL3_ttf.dylib
+codesign --force --sign - $osx/libXDL3_mixer.dylib" ]] || fail "collect-runtime: unexpected macOS tool calls: $(cat "$macos_tools/log")"
+pass "collect-runtime renames the macOS libraries and signs them again"
 
 if [[ "$(uname)" == Linux ]]; then
   check_dependencies="$xdl/tools/check-dependencies.sh"
@@ -426,7 +444,7 @@ if [[ "$(uname)" == Linux ]]; then
     shift 2
     gcc -shared -o "$libraries/$file" "-Wl,-soname,$soname" "$libraries/placeholder.c" "-L$libraries" -Wl,--no-as-needed "$@"
   }
-  link_library libXDL3.so libXDL3.so.0
+  link_library libXDL3.so libXDL3.so
   link_library libSDL3.so libSDL3.so.0
   link_library libfake.so libfake.so
   link_library libXDL3_good.so libXDL3_good.so.0 -lXDL3
@@ -442,7 +460,7 @@ if [[ "$(uname)" == Linux ]]; then
   expect_refusal "check-dependencies refuses a library without XDL3" "does not need XDL3" "$check_dependencies" "$libraries/libXDL3_alone.so"
 
   mkdir -p "$libraries/empty"
-  link_library empty/libXDL3.so libXDL3.so.0 -nostdlib
+  link_library empty/libXDL3.so libXDL3.so -nostdlib
   expect_refusal "check-dependencies refuses an empty dependency list" "could not be read" "$check_dependencies" "$libraries/empty/libXDL3.so"
 
   # A stand-in for otool, which prints the file it is given as that library's dependencies. The first line is the install name.
@@ -457,11 +475,48 @@ else
 fi
 EOF
   chmod +x "$libraries/bin/otool"
-  printf '%s\n' @rpath/libXDL3_image.0.dylib @rpath/libXDL3.0.dylib /usr/lib/libSystem.B.dylib /System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation > "$libraries/libXDL3_image.dylib"
-  printf '%s\n' @rpath/libXDL3_stock.0.dylib @rpath/libSDL3.0.dylib > "$libraries/libXDL3_stock.dylib"
+  printf '%s\n' @rpath/libXDL3_image.dylib @loader_path/libXDL3.dylib /usr/lib/libSystem.B.dylib /System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation > "$libraries/libXDL3_image.dylib"
+  printf '%s\n' @rpath/libXDL3_stock.dylib @rpath/libSDL3.0.dylib > "$libraries/libXDL3_stock.dylib"
   PATH="$libraries/bin:$PATH" "$check_dependencies" "$libraries/libXDL3_image.dylib" > /dev/null
   pass "check-dependencies reads otool output"
   expect_refusal "check-dependencies refuses a dylib that needs stock SDL" "needs stock SDL: @rpath/libSDL3.0.dylib" env "PATH=$libraries/bin:$PATH" "$check_dependencies" "$libraries/libXDL3_stock.dylib"
+  printf '%s\n' @rpath/libXDL3_image.0.dylib @rpath/libXDL3.0.dylib /usr/lib/libSystem.B.dylib > "$libraries/libXDL3_versioned.dylib"
+  expect_refusal "check-dependencies refuses a dylib that needs the installed XDL3 name" "needs @rpath/libXDL3.0.dylib, which is not on the allowlist" \
+    env "PATH=$libraries/bin:$PATH" "$check_dependencies" "$libraries/libXDL3_versioned.dylib"
+
+  # Real libraries as the install names them: a satellite needs libXDL3.so.0 and has no RUNPATH.
+  linux_prefix=$scratch/prefix-linux
+  mkdir -p "$linux_prefix/lib"
+  gcc -shared -o "$linux_prefix/lib/libXDL3.so.0.1.0" -Wl,-soname,libXDL3.so.0 "$libraries/placeholder.c" -Wl,--no-as-needed
+  ln -s libXDL3.so.0.1.0 "$linux_prefix/lib/libXDL3.so.0"
+  ln -s libXDL3.so.0 "$linux_prefix/lib/libXDL3.so"
+  for library in XDL3_image XDL3_ttf XDL3_mixer; do
+    gcc -shared -o "$linux_prefix/lib/lib$library.so.0.1.0" "-Wl,-soname,lib$library.so.0" "$libraries/placeholder.c" "-L$linux_prefix/lib" \
+      -Wl,--no-as-needed -lXDL3
+    ln -s "lib$library.so.0.1.0" "$linux_prefix/lib/lib$library.so.0"
+  done
+  mkdir -p "$libraries/old-patchelf"
+  printf '#!/usr/bin/env bash\necho "patchelf 0.14.3"\n' > "$libraries/old-patchelf/patchelf"
+  chmod +x "$libraries/old-patchelf/patchelf"
+  expect_refusal "collect-runtime refuses patchelf 0.14.3" "patchelf 0.14.3 is older than 0.19" env "PATH=$libraries/old-patchelf:$PATH" \
+    "$collect_runtime" linux-x64 "$linux_prefix" "$scratch/runtime/old-patchelf"
+  linux=$scratch/runtime/linux
+  "$collect_runtime" linux-x64 "$linux_prefix" "$linux" > /dev/null
+  [[ "$(ls "$linux" | LC_ALL=C sort | tr '\n' ' ')" == "libXDL3.so libXDL3_image.so libXDL3_mixer.so libXDL3_ttf.so " && ! -L "$linux/libXDL3_ttf.so" ]] \
+    || fail "collect-runtime: unexpected Linux files: $(ls -l "$linux")"
+  for library in XDL3 XDL3_image XDL3_ttf XDL3_mixer; do
+    readelf -d "$linux/lib$library.so" | grep -F '(SONAME)' | grep -qF "[lib$library.so]" || fail "collect-runtime: lib$library.so has another soname"
+    "$check_dependencies" "$linux/lib$library.so" > /dev/null
+  done
+  readelf -d "$linux/libXDL3_image.so" | grep -F '(RUNPATH)' | grep -qF '[$ORIGIN]' || fail "collect-runtime: libXDL3_image.so has no RUNPATH \$ORIGIN"
+  # A process that loads only a satellite, from another directory, finds XDL3 next to it.
+  printf '#include <dlfcn.h>\n#include <stdio.h>\nint main(int argc, char **argv) { if (!dlopen(argv[1], RTLD_NOW)) { fprintf(stderr, \"%%s\\n\", dlerror()); return 1; } return 0; }\n' \
+    > "$libraries/load.c"
+  gcc -o "$libraries/load" "$libraries/load.c" -ldl
+  (cd / && env -u LD_LIBRARY_PATH "$libraries/load" "$linux/libXDL3_mixer.so" > /dev/null) || fail "collect-runtime: libXDL3_mixer.so does not load alone"
+  pass "collect-runtime renames the Linux libraries, and a satellite loads without XDL3 loaded first"
+  expect_refusal "check-dependencies refuses a library that needs the installed XDL3 name" "needs libXDL3.so.0, which is not on the allowlist" \
+    "$check_dependencies" "$linux_prefix/lib/libXDL3_image.so.0"
 fi
 
 echo "$passed checks passed"
