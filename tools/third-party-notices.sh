@@ -191,6 +191,10 @@ freetype_acknowledgment="Portions of this software are copyright © $freetype_ye
   # The WebGPU backend compiles against webgpu.h of Emscripten's emdawnwebgpu port, which carries this license. Only the browser build
   # has the port, so the repo keeps a copy of the text, and that build checks that the header still carries it.
   notice_file "XDL: WebGPU header of Emscripten's emdawnwebgpu port, in the browser build (XDL3)" LICENSES/webgpu-native-BSD-3-Clause.txt
+  # The browser build also ships the port's webgpu.cpp, compiled, and its JavaScript libraries, under Emscripten's license. The repo keeps
+  # a copy of the text for the same reason, and tools/build-emdawnwebgpu.sh checks it.
+  notice_file "XDL: Emscripten's emdawnwebgpu port, in the browser build (emdawnwebgpu.a and library_webgpu*.js)" \
+    LICENSES/emdawnwebgpu-Emscripten-MIT-NCSA.txt
   # The generated Wayland protocol code carries the license of each protocol's XML. pointer-gestures has no notice.
   for protocol in alpha-modifier-v1 color-management-v1 cursor-shape-v1 fractional-scale-v1 frog-color-management-v1 idle-inhibit-unstable-v1 \
     input-timestamps-unstable-v1 keyboard-shortcuts-inhibit-unstable-v1 pointer-constraints-unstable-v1 pointer-warp-v1 primary-selection-unstable-v1 \

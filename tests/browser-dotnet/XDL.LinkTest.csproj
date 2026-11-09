@@ -1,7 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk.WebAssembly">
     <!--
-      Links the release archives into the .NET browser runtime and binds every library through its P/Invoke module.
-      dotnet publish tests/browser-dotnet -c Release -o build/dotnet-link -p:XdlArchiveDirectory=<directory of XDL3.a> -p:WasmCachePath=<writable Emscripten cache, not the one of emsdk-env.sh>
+      Links the release archives and emdawnwebgpu into the .NET browser runtime with the workload's read-only Emscripten cache, and binds
+      every library through its P/Invoke module.
+      dotnet publish tests/browser-dotnet -c Release -o build/dotnet-link -p:XdlArchiveDirectory=<directory of XDL3.a>
       node tests/browser-dotnet/run.mjs build/dotnet-link/wwwroot
     -->
     <PropertyGroup>
@@ -9,12 +10,16 @@
         <OutputType>Exe</OutputType>
         <Nullable>enable</Nullable>
         <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-        <EmccExtraLDFlags>--use-port=emdawnwebgpu</EmccExtraLDFlags>
         <_XdlArchiveDirectory>$([MSBuild]::EnsureTrailingSlash('$(XdlArchiveDirectory)'))</_XdlArchiveDirectory>
+        <EmccExtraLDFlags>--js-library "$(_XdlArchiveDirectory)library_webgpu_enum_tables.js" --js-library "$(_XdlArchiveDirectory)library_webgpu_generated_struct_info.js" --js-library "$(_XdlArchiveDirectory)library_webgpu_generated_sig_info.js" --js-library "$(_XdlArchiveDirectory)library_webgpu.js"</EmccExtraLDFlags>
     </PropertyGroup>
 
     <ItemGroup>
         <NativeFileReference Include="$(_XdlArchiveDirectory)XDL3.a;$(_XdlArchiveDirectory)XDL3_image.a;$(_XdlArchiveDirectory)XDL3_mixer.a;$(_XdlArchiveDirectory)XDL3_ttf.a" />
+        <NativeFileReference Include="$(_XdlArchiveDirectory)emdawnwebgpu.a" ScanForPInvokes="false" />
+        <!-- What a host page needs to hand XDL its WebGPU device; the link fails when emdawnwebgpu is missing. -->
+        <EmccExportedRuntimeMethod Include="WebGPU" />
+        <EmccExportedFunction Include="_wgpuCreateInstance" />
     </ItemGroup>
 
     <Target Name="_RequireXdlArchiveDirectory" BeforeTargets="BeforeBuild" Condition="'$(XdlArchiveDirectory)' == ''">

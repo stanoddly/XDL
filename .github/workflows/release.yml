@@ -106,7 +106,7 @@ jobs:
             echo
             echo "Each runtime zip holds \`runtimes/<rid>/native/\` with XDL3 and the three satellite libraries, and the licenses in \`THIRD-PARTY-NOTICES.txt\`. A satellite finds XDL3 in its own directory, so the libraries load in any order. On Windows, that needs a load by full path with \`LOAD_WITH_ALTERED_SEARCH_PATH\`, as .NET does."
             echo
-            echo "\`xdl3-browser-wasm-net11.zip\` holds static archives for the .NET 11 browser runtime in \`runtimes/browser-wasm/native/\`, built with Emscripten $EMSCRIPTEN_VERSION and \`-fwasm-exceptions -sWASM_LEGACY_EXCEPTIONS=0\`. They link only into a .NET runtime built with the same Emscripten."
+            echo "\`xdl3-browser-wasm-net11.zip\` holds static archives for the .NET 11 browser runtime in \`runtimes/browser-wasm/native/\`, with emdawnwebgpu as \`emdawnwebgpu.a\` and its JavaScript libraries, built with Emscripten $EMSCRIPTEN_VERSION and \`-fwasm-exceptions -sWASM_LEGACY_EXCEPTIONS=0\`. They link only into a .NET runtime built with the same Emscripten."
             echo
             echo "\`xdl3-headers.zip\` holds the C headers of XDL3 and the satellites in \`include/\`, the same for every target, such as for generating bindings."
           } > release-notes.md

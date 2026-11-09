@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Builds XDL3 and the satellites as static Emscripten libraries for the .NET browser runtime, and installs them into <install prefix>.
+# Builds XDL3 and the satellites as static Emscripten libraries for the .NET browser runtime, and installs them into <install prefix> with
+# emdawnwebgpu, the WebGPU binding that XDL3 calls (tools/build-emdawnwebgpu.sh).
 # They link only into a .NET runtime built with the same Emscripten, so put that one on PATH first: source tools/emsdk-env.sh.
 # Run tools/apply.sh for SDL and each satellite first. Builds in build/cmake-browser and build/cmake-browser-<satellite>.
 # Usage: tools/build-browser.sh <install prefix> [extra CMake flags for XDL3]
@@ -41,3 +42,5 @@ done
 header=$("$(dirname "$emcc")/em-config" CACHE)/ports/emdawnwebgpu/emdawnwebgpu_pkg/webgpu/include/webgpu/webgpu.h
 sed -n '/^\/\/ BSD 3-Clause License$/,/SUCH DAMAGE\.$/p' "$header" | sed -E 's#^// ?##' | diff - "$repo_root/LICENSES/webgpu-native-BSD-3-Clause.txt" \
   || die "The license text in $header differs from LICENSES/webgpu-native-BSD-3-Clause.txt."
+
+"$repo_root/tools/build-emdawnwebgpu.sh" "$install_prefix"

@@ -38,18 +38,21 @@ Each [release](https://github.com/stanoddly/XDL/releases) has one zip per platfo
 
 ## Browser
 
-The `browser-wasm-net11` target builds XDL3 and the satellites as static archives for the .NET 11 browser runtime, with the same codecs. Its zip `xdl3-browser-wasm-net11.zip` holds `runtimes/browser-wasm/native/` with `XDL3.a`, `XDL3_image.a`, `XDL3_mixer.a` and `XDL3_ttf.a`. Emscripten has no stable ABI, so the archives link only into a .NET runtime built with the same Emscripten, the one of .NET 11's `wasm-tools` workload. A later .NET gets a target of its own.
+The `browser-wasm-net11` target builds XDL3 and the satellites as static archives for the .NET 11 browser runtime, with the same codecs. Its zip `xdl3-browser-wasm-net11.zip` holds `runtimes/browser-wasm/native/` with `XDL3.a`, `XDL3_image.a`, `XDL3_mixer.a` and `XDL3_ttf.a`, and with emdawnwebgpu, the WebGPU binding that XDL3 calls: `emdawnwebgpu.a` and four JavaScript libraries. Emscripten has no stable ABI, so the archives link only into a .NET runtime built with the same Emscripten, the one of .NET 11's `wasm-tools` workload. A later .NET gets a target of its own.
 
-Reference the archives with `NativeFileReference` and keep their file names. The .NET browser build takes each file name as the module that `DllImport("XDL3")` and the others bind to.
+Reference the archives with `NativeFileReference` and keep their file names. The .NET browser build takes each file name as the module that `DllImport("XDL3")` and the others bind to. `emdawnwebgpu.a` is no such module. Pass the JavaScript libraries in this order, because `library_webgpu.js` reads the tables of the other three.
 
 ```xml
 <ItemGroup>
   <NativeFileReference Include="native/XDL3.a;native/XDL3_image.a;native/XDL3_mixer.a;native/XDL3_ttf.a" />
+  <NativeFileReference Include="native/emdawnwebgpu.a" ScanForPInvokes="false" />
 </ItemGroup>
 <PropertyGroup>
-  <EmccExtraLDFlags>--use-port=emdawnwebgpu</EmccExtraLDFlags>
+  <EmccExtraLDFlags>--js-library native/library_webgpu_enum_tables.js --js-library native/library_webgpu_generated_struct_info.js --js-library native/library_webgpu_generated_sig_info.js --js-library native/library_webgpu.js</EmccExtraLDFlags>
 </PropertyGroup>
 ```
+
+This links emdawnwebgpu without `--use-port=emdawnwebgpu`. The port would compile `webgpu.cpp` into the Emscripten cache at link time, and the cache of the `wasm-tools` workload is read-only, so the port needs a writable copy of it.
 
 The .NET runtime does not use asyncify, so an app must create the GPU device without blocking. [The WebGPU patch's README](patches/0007-webgpu-backend/README.md) describes how.
 

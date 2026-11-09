@@ -400,10 +400,17 @@ done
 [[ "$(ls "$scratch/runtime/windows" | LC_ALL=C sort | tr '\n' ' ')" == "XDL3.dll XDL3_image.dll XDL3_mixer.dll XDL3_ttf.dll " ]] \
   || fail "collect-runtime: unexpected Windows files: $(ls "$scratch/runtime/windows")"
 pass "collect-runtime copies the Windows libraries"
+expect_refusal "collect-runtime refuses a browser build without emdawnwebgpu" "libemdawnwebgpu.a does not exist" \
+  "$collect_runtime" browser-wasm "$prefix" "$scratch/runtime/browser-incomplete"
+echo emdawnwebgpu > "$prefix/lib/libemdawnwebgpu.a"
+mkdir -p "$prefix/share/emdawnwebgpu"
+for library in library_webgpu_enum_tables library_webgpu_generated_struct_info library_webgpu_generated_sig_info library_webgpu; do
+  echo "$library" > "$prefix/share/emdawnwebgpu/$library.js"
+done
 "$collect_runtime" browser-wasm "$prefix" "$scratch/runtime/browser" > /dev/null
-[[ "$(ls "$scratch/runtime/browser" | LC_ALL=C sort | tr '\n' ' ')" == "XDL3.a XDL3_image.a XDL3_mixer.a XDL3_ttf.a " ]] \
+[[ "$(ls "$scratch/runtime/browser" | LC_ALL=C sort | tr '\n' ' ')" == "XDL3.a XDL3_image.a XDL3_mixer.a XDL3_ttf.a emdawnwebgpu.a library_webgpu.js library_webgpu_enum_tables.js library_webgpu_generated_sig_info.js library_webgpu_generated_struct_info.js " ]] \
   || fail "collect-runtime: unexpected browser files: $(ls "$scratch/runtime/browser")"
-pass "collect-runtime copies the browser archives without the lib prefix"
+pass "collect-runtime copies the browser archives without the lib prefix, with emdawnwebgpu and its JavaScript libraries"
 expect_refusal "collect-runtime refuses an unknown RID" "Unknown RID: android-arm64" "$collect_runtime" android-arm64 "$prefix" "$scratch/runtime/android"
 
 # Stand-ins for the macOS tools, which log their arguments.
