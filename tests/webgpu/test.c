@@ -24,6 +24,7 @@
 #include <SDL3/SDL_main.h>
 #include <XDL/XDL.h>
 #include <emscripten.h>
+#include <webgpu/webgpu.h>
 
 #define TEST_WIDTH 64
 #define TEST_HEIGHT 4
@@ -707,6 +708,84 @@ static bool ReadMultisampleStorageTexture(SDL_GPUDevice *device, Uint8 out_pixel
     return true;
 }
 
+static SDL_AssertState SDLCALL CountAssertion(const SDL_AssertData *data, void *userdata)
+{
+    SDL_Log("Assertion: %s", data->condition);
+    (*(int *)userdata)++;
+    return SDL_ASSERTION_IGNORE;
+}
+
+// In debug mode, binding a storage buffer created without the matching usage asserts, once for each of the four ways to bind one.
+// Buffers with the matching usage bind in each of those ways without an assertion.
+static bool BindStorageBuffersByUsage(SDL_GPUDevice *device, int *out_rejected, int *out_accepted_assertions)
+{
+    SDL_GPUBufferCreateInfo vertex_info = { .usage = SDL_GPU_BUFFERUSAGE_VERTEX, .size = 64 };
+    SDL_GPUBufferCreateInfo storage_info = { .usage = SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ, .size = 64 };
+    SDL_GPUBufferCreateInfo compute_info = { .usage = SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ | SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE, .size = 64 };
+    SDL_GPUTextureCreateInfo target_info = {
+        .type = SDL_GPU_TEXTURETYPE_2D,
+        .format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM,
+        .usage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET,
+        .width = 4,
+        .height = 4,
+        .layer_count_or_depth = 1,
+        .num_levels = 1,
+    };
+    SDL_GPUBuffer *vertex_buffer = SDL_CreateGPUBuffer(device, &vertex_info);
+    SDL_GPUBuffer *storage_buffer = SDL_CreateGPUBuffer(device, &storage_info);
+    SDL_GPUBuffer *compute_buffer = SDL_CreateGPUBuffer(device, &compute_info);
+    SDL_GPUTexture *target = SDL_CreateGPUTexture(device, &target_info);
+    SDL_GPUCommandBuffer *cmd = SDL_AcquireGPUCommandBuffer(device);
+    if (!vertex_buffer || !storage_buffer || !compute_buffer || !target || !cmd) {
+        return SDL_SetError("Creating the storage buffer binding resources failed: %s", SDL_GetError());
+    }
+
+    int assertions = 0;
+    SDL_AssertionHandler original_handler = SDL_GetAssertionHandler(NULL);
+    SDL_SetAssertionHandler(CountAssertion, &assertions);
+
+    SDL_GPUColorTargetInfo color_target = { .texture = target, .load_op = SDL_GPU_LOADOP_CLEAR, .store_op = SDL_GPU_STOREOP_STORE };
+    SDL_GPURenderPass *render_pass = SDL_BeginGPURenderPass(cmd, &color_target, 1, NULL);
+    SDL_BindGPUVertexStorageBuffers(render_pass, 0, &storage_buffer, 1);
+    SDL_BindGPUFragmentStorageBuffers(render_pass, 0, &storage_buffer, 1);
+    SDL_EndGPURenderPass(render_pass);
+
+    SDL_GPUStorageBufferReadWriteBinding accepted_binding = { .buffer = compute_buffer };
+    SDL_GPUComputePass *accepted_pass = SDL_BeginGPUComputePass(cmd, NULL, 0, &accepted_binding, 1);
+    if (accepted_pass) {
+        SDL_EndGPUComputePass(accepted_pass);
+    }
+    SDL_GPUComputePass *compute_pass = SDL_BeginGPUComputePass(cmd, NULL, 0, NULL, 0);
+    SDL_BindGPUComputeStorageBuffers(compute_pass, 0, &compute_buffer, 1);
+    *out_accepted_assertions = assertions;
+    SDL_BindGPUComputeStorageBuffers(compute_pass, 0, &vertex_buffer, 1);
+    SDL_EndGPUComputePass(compute_pass);
+
+    render_pass = SDL_BeginGPURenderPass(cmd, &color_target, 1, NULL);
+    SDL_BindGPUVertexStorageBuffers(render_pass, 0, &vertex_buffer, 1);
+    SDL_BindGPUFragmentStorageBuffers(render_pass, 0, &vertex_buffer, 1);
+    SDL_EndGPURenderPass(render_pass);
+
+    SDL_GPUStorageBufferReadWriteBinding read_write_binding = { .buffer = vertex_buffer };
+    SDL_GPUComputePass *rejected_pass = SDL_BeginGPUComputePass(cmd, NULL, 0, &read_write_binding, 1);
+
+    SDL_SetAssertionHandler(original_handler, NULL);
+    *out_rejected = assertions - *out_accepted_assertions;
+
+    SDL_CancelGPUCommandBuffer(cmd);
+    SDL_ReleaseGPUTexture(device, target);
+    SDL_ReleaseGPUBuffer(device, compute_buffer);
+    SDL_ReleaseGPUBuffer(device, storage_buffer);
+    SDL_ReleaseGPUBuffer(device, vertex_buffer);
+    if (!accepted_pass) {
+        return SDL_SetError("A compute pass did not begin with a read-write buffer created with COMPUTE_STORAGE_WRITE");
+    }
+    if (rejected_pass) {
+        return SDL_SetError("A compute pass began with a read-write buffer created without COMPUTE_STORAGE_WRITE");
+    }
+    return true;
+}
+
 // Draws, caches bind groups and blits on a new device, then destroys it.
 static bool UseAndDestroyDevice(void)
 {
@@ -750,6 +829,126 @@ static bool UseAndDestroyDevice(void)
     return true;
 }
 
+EM_JS(bool, IsCanvasDisplayed, (void), {
+    return getComputedStyle(document.querySelector("#canvas")).display !== "none";
+});
+
+// A window created hidden hides its canvas, SDL_ShowWindow and SDL_HideWindow show and hide it, and destroying the window shows it again.
+static bool ShowAndHideWindow(void)
+{
+    SDL_Window *window = SDL_CreateWindow("XDL WebGPU test hidden window", 64, 64, SDL_WINDOW_HIDDEN);
+    if (!window) {
+        return SDL_SetError("SDL_CreateWindow(SDL_WINDOW_HIDDEN): %s", SDL_GetError());
+    }
+    bool created_hidden = !IsCanvasDisplayed();
+    SDL_ShowWindow(window);
+    bool shown = IsCanvasDisplayed();
+    SDL_HideWindow(window);
+    bool hidden = !IsCanvasDisplayed();
+    SDL_DestroyWindow(window);
+    bool destroyed_shown = IsCanvasDisplayed();
+    SDL_Log("Canvas hidden at creation: %s, shown: %s, hidden: %s, shown after destroy: %s", created_hidden ? "yes" : "no", shown ? "yes" : "no", hidden ? "yes" : "no", destroyed_shown ? "yes" : "no");
+    if (!created_hidden || !shown || !hidden || !destroyed_shown) {
+        return SDL_SetError("The canvas did not follow the window's visibility");
+    }
+    return true;
+}
+
+// Requests an adapter and a device in the page, as an app that adopts them does, and imports both under the instance.
+// Writes the device name the backend should report, which is empty when the browser hides every adapter field.
+EM_ASYNC_JS(bool, RequestPageDevice, (WGPUInstance instance, WGPUAdapter *out_adapter, WGPUDevice *out_device, char *out_name, int name_size), {
+    const adapter = await navigator.gpu.requestAdapter();
+    if (!adapter) {
+        return false;
+    }
+    const device = await adapter.requestDevice({ requiredFeatures: [...adapter.features] });
+    globalThis.xdlTestPageDevice = device;
+    const adapterPtr = WebGPU.importJsAdapter(adapter, instance);
+    HEAPU32[out_adapter >> 2] = adapterPtr;
+    HEAPU32[out_device >> 2] = WebGPU.importJsDevice(device, adapterPtr);
+    const info = adapter.info;
+    const name = info.description || [info.vendor, info.architecture, info.device].filter(Boolean).join(" ");
+    const bytes = new TextEncoder().encode(name).subarray(0, name_size - 1);
+    HEAPU8.set(bytes, out_name);
+    HEAPU8[out_name + bytes.length] = 0;
+    return true;
+});
+
+// Destroys the page's device and returns once its lost promise has settled, after the backend's own handler.
+EM_ASYNC_JS(void, LosePageDevice, (void), {
+    globalThis.xdlTestPageDevice.destroy();
+    await globalThis.xdlTestPageDevice.lost;
+});
+
+EM_JS(int, CountDeviceLossWatches, (void), {
+    return WebGPU.xdlDeviceLossWatches ? WebGPU.xdlDeviceLossWatches.size : 0;
+});
+
+// Adopts a device from the page and loses it there. The adopted device reports its adapter's name, fails to acquire command buffers
+// after the loss, and destroying an adopted device drops the backend's watch on it.
+static bool UseAndLoseAdoptedDevice(void)
+{
+    WGPUInstance instance = wgpuCreateInstance(NULL);
+    WGPUAdapter adapter = NULL;
+    WGPUDevice page_device = NULL;
+    char expected_name[256];
+    if (!instance || !RequestPageDevice(instance, &adapter, &page_device, expected_name, sizeof(expected_name))) {
+        return SDL_SetError("Requesting a device in the page failed");
+    }
+
+    SDL_PropertiesID props = SDL_CreateProperties();
+    SDL_SetBooleanProperty(props, XDL_PROP_GPU_DEVICE_CREATE_SHADERS_WGSL_BOOLEAN, true);
+    SDL_SetBooleanProperty(props, SDL_PROP_GPU_DEVICE_CREATE_DEBUGMODE_BOOLEAN, true);
+    SDL_SetPointerProperty(props, XDL_PROP_GPU_DEVICE_CREATE_WEBGPU_INSTANCE_POINTER, instance);
+    SDL_SetPointerProperty(props, XDL_PROP_GPU_DEVICE_CREATE_WEBGPU_ADAPTER_POINTER, adapter);
+    SDL_SetPointerProperty(props, XDL_PROP_GPU_DEVICE_CREATE_WEBGPU_DEVICE_POINTER, page_device);
+
+    // A device destroyed before its loss stops being watched.
+    SDL_GPUDevice *device = SDL_CreateGPUDeviceWithProperties(props);
+    if (!device) {
+        return SDL_SetError("Adopting the page's device failed: %s", SDL_GetError());
+    }
+    int watches_while_adopted = CountDeviceLossWatches();
+    SDL_DestroyGPUDevice(device);
+    int watches_after_destroy = CountDeviceLossWatches();
+    SDL_Log("Device loss watches: %d while a device is adopted, %d after destroying it", watches_while_adopted, watches_after_destroy);
+    if (watches_while_adopted != 1 || watches_after_destroy != 0) {
+        return SDL_SetError("Wrong number of device loss watches");
+    }
+
+    device = SDL_CreateGPUDeviceWithProperties(props);
+    SDL_DestroyProperties(props);
+    if (!device) {
+        return SDL_SetError("Adopting the page's device again failed: %s", SDL_GetError());
+    }
+
+    const char *name = SDL_GetStringProperty(SDL_GetGPUDeviceProperties(device), SDL_PROP_GPU_DEVICE_NAME_STRING, NULL);
+    SDL_Log("Adopted device name: \"%s\", page adapter name: \"%s\"", name ? name : "(unset)", expected_name);
+    if (expected_name[0] == '\0' ? name != NULL : name == NULL || SDL_strcmp(name, expected_name) != 0) {
+        return SDL_SetError("The adopted device's name does not match its adapter");
+    }
+
+    SDL_GPUCommandBuffer *cmd = SDL_AcquireGPUCommandBuffer(device);
+    if (!cmd || !SDL_SubmitGPUCommandBuffer(cmd)) {
+        return SDL_SetError("Submitting to the adopted device failed: %s", SDL_GetError());
+    }
+    SDL_WaitForGPUIdle(device);
+
+    LosePageDevice();
+    cmd = SDL_AcquireGPUCommandBuffer(device);
+    SDL_Log("Acquiring a command buffer after the page lost the device: %s", cmd ? "succeeded" : SDL_GetError());
+    if (cmd) {
+        SDL_CancelGPUCommandBuffer(cmd);
+        return SDL_SetError("A command buffer was acquired after the adopted device was lost");
+    }
+
+    SDL_DestroyGPUDevice(device);
+    wgpuDeviceRelease(page_device);
+    wgpuAdapterRelease(adapter);
+    wgpuInstanceRelease(instance);
+    return true;
+}
+
 SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv)
 {
     SDL_free_func original_free;
@@ -786,9 +985,18 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv)
     }
     SDL_Log("SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_PRIVATE) rejected: %s", SDL_GetError());
 
+    if (!ShowAndHideWindow()) {
+        SDL_Log("Showing and hiding a window failed: %s", SDL_GetError());
+        return SDL_APP_FAILURE;
+    }
+
     state->window = SDL_CreateWindow("XDL WebGPU test", 256, 256, 0);
     if (!state->window) {
         SDL_Log("SDL_CreateWindow failed: %s", SDL_GetError());
+        return SDL_APP_FAILURE;
+    }
+    if (!IsCanvasDisplayed()) {
+        SDL_Log("The canvas of a window created shown is hidden");
         return SDL_APP_FAILURE;
     }
 
@@ -807,6 +1015,8 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv)
     }
     SDL_Log("Device shader formats: 0x%x", (unsigned)SDL_GetGPUShaderFormats(state->device));
     SDL_Log("Device driver: %s", SDL_GetGPUDeviceDriver(state->device));
+    const char *device_name = SDL_GetStringProperty(SDL_GetGPUDeviceProperties(state->device), SDL_PROP_GPU_DEVICE_NAME_STRING, NULL);
+    SDL_Log("Device name: %s", device_name ? device_name : "(unset)");
 
     if (!SDL_ClaimWindowForGPUDevice(state->device, state->window)) {
         SDL_Log("Claiming the window after destroying its previous device failed: %s", SDL_GetError());
@@ -919,6 +1129,17 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv)
         return SDL_APP_FAILURE;
     }
 
+    int rejected_bindings = 0;
+    int accepted_assertions = 0;
+    if (!BindStorageBuffersByUsage(state->device, &rejected_bindings, &accepted_assertions)) {
+        SDL_Log("Binding storage buffers by usage failed: %s", SDL_GetError());
+        return SDL_APP_FAILURE;
+    }
+    SDL_Log("Storage buffer bindings: %d assertions for matching usage, %d of 4 rejected for wrong usage", accepted_assertions, rejected_bindings);
+    if (accepted_assertions != 0 || rejected_bindings != 4) {
+        return SDL_APP_FAILURE;
+    }
+
     // Destroying a device must release every layout it created, including those of its blit pipelines and cached bind groups.
     int layouts_before_device = CountLiveLayouts();
     if (!UseAndDestroyDevice()) {
@@ -928,6 +1149,11 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv)
     int layouts_after_device = CountLiveLayouts();
     SDL_Log("Live layouts: %d before creating a device, %d after destroying it", layouts_before_device, layouts_after_device);
     if (layouts_after_device != layouts_before_device) {
+        return SDL_APP_FAILURE;
+    }
+
+    if (!UseAndLoseAdoptedDevice()) {
+        SDL_Log("Using and losing an adopted device failed: %s", SDL_GetError());
         return SDL_APP_FAILURE;
     }
 

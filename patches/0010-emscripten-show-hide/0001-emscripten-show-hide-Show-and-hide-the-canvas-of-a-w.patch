@@ -1,0 +1,156 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: botoddly <250804054+botoddly@users.noreply.github.com>
+Date: Mon, 9 Nov 2026 14:46:16 +0100
+Subject: [PATCH] emscripten-show-hide: Show and hide the canvas of a window
+
+---
+ src/video/emscripten/SDL_emscriptenevents.c |  8 ++-
+ src/video/emscripten/SDL_emscriptenvideo.c  | 59 +++++++++++++++++++--
+ src/video/emscripten/SDL_emscriptenvideo.h  |  2 +
+ 3 files changed, 64 insertions(+), 5 deletions(-)
+
+diff --git a/src/video/emscripten/SDL_emscriptenevents.c b/src/video/emscripten/SDL_emscriptenevents.c
+index 39a5ac611f4375539aefacb22a1116b219eb0341..6fc913010fc5da7df0d3c3c14e3c812f84212993 100644
+--- a/src/video/emscripten/SDL_emscriptenevents.c
++++ b/src/video/emscripten/SDL_emscriptenevents.c
+@@ -540,8 +540,8 @@ static EM_BOOL Emscripten_HandleResize(int eventType, const EmscriptenUiEvent *u
+             SDL_assert(window_data->window->flags & SDL_WINDOW_RESIZABLE);
+             w = window_data->window->w;
+             h = window_data->window->h;
+-            // this will only work if the canvas size is set through css
+-            if (window_data->external_size) {
++            // this will only work if the canvas size is set through css, and not while it is hidden, as it then has no size
++            if (window_data->external_size && !window_data->canvas_hidden) {
+                 emscripten_get_element_css_size(window_data->canvas_id, &w, &h);
+             }
+         }
+@@ -596,6 +596,10 @@ Emscripten_HandleCanvasResize(int eventType, const void *reserved, void *userDat
+ static EM_BOOL Emscripten_HandleVisibilityChange(int eventType, const EmscriptenVisibilityChangeEvent *visEvent, void *userData)
+ {
+     SDL_WindowData *window_data = userData;
++    // A window that SDL_HideWindow hid stays hidden when the page becomes visible.
++    if (!visEvent->hidden && window_data->canvas_hidden) {
++        return 0;
++    }
+     SDL_SendWindowEvent(window_data->window, visEvent->hidden ? SDL_EVENT_WINDOW_HIDDEN : SDL_EVENT_WINDOW_SHOWN, 0, 0);
+     return 0;
+ }
+diff --git a/src/video/emscripten/SDL_emscriptenvideo.c b/src/video/emscripten/SDL_emscriptenvideo.c
+index cd979af8bb5c3522db978adc9d4a725cdf12d183..8d907a388c3cc9d98ba30f855f21ad2f4610ff1e 100644
+--- a/src/video/emscripten/SDL_emscriptenvideo.c
++++ b/src/video/emscripten/SDL_emscriptenvideo.c
+@@ -51,6 +51,8 @@ static void Emscripten_PumpEvents(SDL_VideoDevice *_this);
+ static void Emscripten_SetWindowTitle(SDL_VideoDevice *_this, SDL_Window *window);
+ static bool Emscripten_SetWindowIcon(SDL_VideoDevice *_this, SDL_Window *window, SDL_Surface *icon);
+ static bool Emscripten_SetWindowFillDocument(SDL_VideoDevice *_this, SDL_Window *window, bool fill);
++static void Emscripten_ShowWindow(SDL_VideoDevice *_this, SDL_Window *window);
++static void Emscripten_HideWindow(SDL_VideoDevice *_this, SDL_Window *window);
+ 
+ SDL_Window *Emscripten_fill_document_window = NULL;
+ 
+@@ -161,9 +163,9 @@ static SDL_VideoDevice *Emscripten_CreateDevice(void)
+     /*device->SetWindowPosition = Emscripten_SetWindowPosition;*/
+     device->SetWindowSize = Emscripten_SetWindowSize;
+     device->SetWindowResizable = Emscripten_SetWindowResizable;
+-    /*device->ShowWindow = Emscripten_ShowWindow;
++    device->ShowWindow = Emscripten_ShowWindow;
+     device->HideWindow = Emscripten_HideWindow;
+-    device->RaiseWindow = Emscripten_RaiseWindow;
++    /*device->RaiseWindow = Emscripten_RaiseWindow;
+     device->MaximizeWindow = Emscripten_MaximizeWindow;
+     device->MinimizeWindow = Emscripten_MinimizeWindow;
+     device->RestoreWindow = Emscripten_RestoreWindow;
+@@ -562,6 +564,26 @@ static bool Emscripten_SetWindowFillDocument(SDL_VideoDevice *_this, SDL_Window
+     return true;
+ }
+ 
++// Hides the canvas with an inline display of none, and restores its previous inline display when shown again.
++static void Emscripten_SetCanvasHidden(SDL_WindowData *data, bool hidden)
++{
++    if (data->canvas_hidden == hidden) {
++        return;
++    }
++    data->canvas_hidden = hidden;
++
++    MAIN_THREAD_EM_ASM({
++        var canvas = document.querySelector(UTF8ToString($0));
++        if (canvas && $1) {
++            canvas.SDL3_original_display = canvas.style.display;
++            canvas.style.display = 'none';
++        } else if (canvas) {
++            canvas.style.display = canvas.SDL3_original_display;
++            delete canvas.SDL3_original_display;
++        }
++    }, data->canvas_id, hidden);
++}
++
+ static bool Emscripten_CreateWindow(SDL_VideoDevice *_this, SDL_Window *window, SDL_PropertiesID props)
+ {
+     SDL_WindowData *wdata;
+@@ -624,6 +646,10 @@ static bool Emscripten_CreateWindow(SDL_VideoDevice *_this, SDL_Window *window,
+ 
+     Emscripten_RegisterEventHandlers(wdata);
+ 
++    // SDL creates every window hidden and shows it afterwards unless SDL_WINDOW_HIDDEN was requested.
++    // The canvas is measured above, so hiding it here does not affect its size.
++    Emscripten_SetCanvasHidden(wdata, true);
++
+     // Make the emscripten "fullscreen" button go through SDL.
+     MAIN_THREAD_EM_ASM({
+         Module['requestFullscreen'] = function(lockPointer, resizeCanvas) {
+@@ -639,6 +665,32 @@ static bool Emscripten_CreateWindow(SDL_VideoDevice *_this, SDL_Window *window,
+     return true;
+ }
+ 
++static void Emscripten_ShowWindow(SDL_VideoDevice *_this, SDL_Window *window)
++{
++    SDL_WindowData *data = window->internal;
++
++    Emscripten_SetCanvasHidden(data, false);
++
++    // A resizable canvas sized by CSS keeps its size while hidden, so take its size again now that it has one.
++    if (data->external_size && (window->flags & SDL_WINDOW_RESIZABLE) && window != Emscripten_fill_document_window) {
++        double css_w, css_h;
++        emscripten_get_element_css_size(data->canvas_id, &css_w, &css_h);
++        emscripten_set_canvas_element_size(data->canvas_id, SDL_lroundf(css_w * data->pixel_ratio), SDL_lroundf(css_h * data->pixel_ratio));
++        SDL_SendWindowEvent(window, SDL_EVENT_WINDOW_RESIZED, SDL_lroundf(css_w), SDL_lroundf(css_h));
++    }
++
++    // The only window always has focus while it is shown.
++    SDL_SetMouseFocus(window);
++    SDL_SetKeyboardFocus(window);
++}
++
++static void Emscripten_HideWindow(SDL_VideoDevice *_this, SDL_Window *window)
++{
++    Emscripten_SetCanvasHidden(window->internal, true);
++    SDL_SetMouseFocus(NULL);
++    SDL_SetKeyboardFocus(NULL);
++}
++
+ static void Emscripten_SetWindowResizable(SDL_VideoDevice *_this, SDL_Window * window, bool resizable)
+ {
+     // this function just has to exist or the higher level won't let the window change its SDL_WINDOW_RESIZABLE flag.
+@@ -688,7 +740,8 @@ static void Emscripten_DestroyWindow(SDL_VideoDevice *_this, SDL_Window *window)
+ 
+         Emscripten_UnregisterEventHandlers(data);
+ 
+-        // We can't destroy the canvas, so resize it to zero instead
++        // We can't destroy the canvas, so show it again and resize it to zero instead
++        Emscripten_SetCanvasHidden(data, false);
+         emscripten_set_canvas_element_size(data->canvas_id, 0, 0);
+         if (data->pixel_ratio != 1.0f) {
+             emscripten_set_element_css_size(data->canvas_id, 1, 1);
+diff --git a/src/video/emscripten/SDL_emscriptenvideo.h b/src/video/emscripten/SDL_emscriptenvideo.h
+index 319962a0e9cba970b50f1ef575d59f33774c6cfc..e8c72d23a4214537f75afde3d3591e0a73e3e986 100644
+--- a/src/video/emscripten/SDL_emscriptenvideo.h
++++ b/src/video/emscripten/SDL_emscriptenvideo.h
+@@ -45,6 +45,8 @@ struct SDL_WindowData
+ 
+     bool external_size;
+ 
++    bool canvas_hidden;
++
+     Uint32 fullscreen_mode_flags;
+     bool fullscreen_resize;
+     bool fullscreen_change_in_progress;

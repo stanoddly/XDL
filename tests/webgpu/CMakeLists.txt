@@ -16,5 +16,7 @@ add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../build/SDL" SDL EXCLUDE_FROM_
 add_executable(xdl_webgpu_test test.c)
 set_target_properties(xdl_webgpu_test PROPERTIES OUTPUT_NAME test SUFFIX .html)
 target_link_libraries(xdl_webgpu_test PRIVATE SDL3::SDL3-static)
+# The test includes webgpu.h to create the instance an adopted adapter and device belong to.
+target_compile_options(xdl_webgpu_test PRIVATE --use-port=emdawnwebgpu)
 target_link_options(xdl_webgpu_test PRIVATE -sASYNCIFY -sALLOW_MEMORY_GROWTH --shell-file ${CMAKE_CURRENT_SOURCE_DIR}/shell.html)
 set_property(TARGET xdl_webgpu_test APPEND PROPERTY LINK_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shell.html)

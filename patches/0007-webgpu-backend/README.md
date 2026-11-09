@@ -25,6 +25,12 @@ An app that cannot use them, such as one on the .NET browser runtime, must not b
 1. Get the `WGPUInstance`, `WGPUAdapter` and `WGPUDevice` itself, asynchronously, and pass all three to `SDL_CreateGPUDeviceWithProperties()` with the `XDL_PROP_GPU_DEVICE_CREATE_WEBGPU_*` properties and `XDL_PROP_GPU_DEVICE_CREATE_SHADERS_WGSL_BOOLEAN`. The device must have the `depth-clip-control` and `indirect-first-instance` features, unless `SDL_PROP_GPU_DEVICE_CREATE_FEATURE_DEPTH_CLAMPING_BOOLEAN` and `SDL_PROP_GPU_DEVICE_CREATE_FEATURE_INDIRECT_DRAW_FIRST_INSTANCE_BOOLEAN` are false. Otherwise creating the SDL device fails.
 2. Per frame, use only `SDL_AcquireGPUSwapchainTexture()` and `SDL_QueryGPUFence()`.
 
+## Device name and device loss
+
+`SDL_PROP_GPU_DEVICE_NAME_STRING` holds the adapter's description. Browsers often leave the description empty for privacy, so the name then joins the adapter's vendor, architecture and device, such as `amd rdna-4`. It stays unset when all of them are empty. WebGPU reports no driver, so the driver properties stay unset.
+
+An adopted device gets no device-lost callback, because WebGPU takes that callback only when it creates a device. The backend watches the JavaScript device's `lost` promise instead. After the loss, `SDL_AcquireGPUCommandBuffer` fails with "WebGPU device has been lost", as it does for a device SDL created. For an adopted device, SDL does not log the reason; read it from `device.lost` in the page.
+
 ## Linking
 
 `SDL3::SDL3-static` carries `--use-port=emdawnwebgpu` in its link interface. An app that links the archive directly must pass that flag itself.
@@ -41,4 +47,4 @@ cmake --build build/webgpu-test --parallel
 tests/webgpu/run-test.sh
 ```
 
-It prints `GPU driver 0: webgpu`, passes its readbacks, submits its frames, and ends with `XDL WebGPU test PASSED`.
+It prints `GPU driver 0: webgpu`, passes its readbacks, submits its frames, and ends with `XDL WebGPU test PASSED`. It also adopts a device that the page requested, checks its name, and destroys it in the page to check that SDL notices the loss.

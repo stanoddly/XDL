@@ -1,0 +1,75 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: botoddly <250804054+botoddly@users.noreply.github.com>
+Date: Mon, 9 Nov 2026 14:43:21 +0100
+Subject: [PATCH] webgpu-backend: Report the adapter's name as the GPU device
+ name
+
+---
+ src/gpu/webgpu/SDL_gpu_webgpu.c | 47 +++++++++++++++++++++++++++++++++
+ 1 file changed, 47 insertions(+)
+
+diff --git a/src/gpu/webgpu/SDL_gpu_webgpu.c b/src/gpu/webgpu/SDL_gpu_webgpu.c
+index 92f92a2859a4433afd8d3b8c7e2d170e8daf60cc..6aa478b4d4318a5d22a3a22d823fb6039772e8c8 100644
+--- a/src/gpu/webgpu/SDL_gpu_webgpu.c
++++ b/src/gpu/webgpu/SDL_gpu_webgpu.c
+@@ -1689,6 +1689,51 @@ static void WEBGPU_INTERNAL_RequestAdapter(WebGPURenderer *renderer, bool *succe
+     WEBGPU_INTERNAL_ForgetFuture((double)future.id);
+ }
+ 
++// Appends a non-empty string view to name, after a space if name is not empty.
++static void WEBGPU_INTERNAL_AppendDeviceNamePart(char *name, size_t nameSize, WGPUStringView part)
++{
++    if (part.data == NULL) {
++        return;
++    }
++    size_t length = part.length == WGPU_STRLEN ? SDL_strlen(part.data) : part.length;
++    if (length == 0) {
++        return;
++    }
++    size_t used = SDL_strlen(name);
++    if (used > 0 && used + 1 < nameSize) {
++        name[used++] = ' ';
++    }
++    size_t copied = SDL_min(length, nameSize - 1 - used);
++    SDL_memcpy(name + used, part.data, copied);
++    name[used + copied] = '\0';
++}
++
++// Records the adapter's description as the device name. Browsers often leave it empty for privacy,
++// so the name falls back to the vendor, architecture and device, and stays unset when all of them are empty.
++static void WEBGPU_INTERNAL_SetDeviceName(WebGPURenderer *renderer)
++{
++    WGPUAdapterInfo info = WGPU_ADAPTER_INFO_INIT;
++    if (wgpuAdapterGetInfo(renderer->adapter, &info) != WGPUStatus_Success) {
++        return;
++    }
++
++    char name[256] = { 0 };
++    WEBGPU_INTERNAL_AppendDeviceNamePart(name, sizeof(name), info.description);
++    if (name[0] == '\0') {
++        WEBGPU_INTERNAL_AppendDeviceNamePart(name, sizeof(name), info.vendor);
++        WEBGPU_INTERNAL_AppendDeviceNamePart(name, sizeof(name), info.architecture);
++        WEBGPU_INTERNAL_AppendDeviceNamePart(name, sizeof(name), info.device);
++    }
++    if (name[0] != '\0') {
++        SDL_SetStringProperty(renderer->props, SDL_PROP_GPU_DEVICE_NAME_STRING, name);
++        if (renderer->debugMode) {
++            SDL_LogInfo(SDL_LOG_CATEGORY_GPU, "WebGPU Device: %s", name);
++        }
++    }
++
++    wgpuAdapterInfoFreeMembers(info);
++}
++
+ // WebGPU can only filter these formats with the float32-filterable feature.
+ static bool WEBGPU_INTERNAL_IsFloat32Format(WGPUTextureFormat format)
+ {
+@@ -6609,6 +6654,8 @@ static SDL_GPUDevice *WEBGPU_CreateDevice(bool debugMode, bool preferLowPower, S
+         return NULL;
+     }
+ 
++    WEBGPU_INTERNAL_SetDeviceName(renderer);
++
+     if (externalDevice != NULL) {
+         WGPUFeatureName requiredFeatures[3];
+         Uint32 requiredFeatureCount = WEBGPU_INTERNAL_GetRequiredFeatures(renderer->props, requiredFeatures);

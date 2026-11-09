@@ -1,0 +1,23 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: botoddly <250804054+botoddly@users.noreply.github.com>
+Date: Mon, 9 Nov 2026 14:43:21 +0100
+Subject: [PATCH] webgpu-backend: Return the renderer's properties from
+ SDL_GetGPUDeviceProperties
+
+---
+ src/gpu/webgpu/SDL_gpu_webgpu.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/gpu/webgpu/SDL_gpu_webgpu.c b/src/gpu/webgpu/SDL_gpu_webgpu.c
+index 7915971d1555e49f16506859826eb14f563b6992..92f92a2859a4433afd8d3b8c7e2d170e8daf60cc 100644
+--- a/src/gpu/webgpu/SDL_gpu_webgpu.c
++++ b/src/gpu/webgpu/SDL_gpu_webgpu.c
+@@ -1488,7 +1488,7 @@ static inline Uint32 WEBGPU_INTERNAL_GetTextureViewIndex(Uint32 layer, Uint32 le
+ static SDL_PropertiesID WEBGPU_GetDeviceProperties(
+     SDL_GPUDevice *device)
+ {
+-    WebGPURenderer *renderer = (WebGPURenderer *)device;
++    WebGPURenderer *renderer = (WebGPURenderer *)device->driverData;
+     return renderer->props;
+ }
+ 
