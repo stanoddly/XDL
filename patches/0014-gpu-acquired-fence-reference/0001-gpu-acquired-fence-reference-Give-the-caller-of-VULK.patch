@@ -1,0 +1,116 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: botoddly <250804054+botoddly@users.noreply.github.com>
+Date: Mon, 9 Nov 2026 17:40:52 +0100
+Subject: [PATCH] gpu-acquired-fence-reference: Give the caller of
+ VULKAN_SubmitAndAcquireFence its own fence reference
+
+---
+ src/gpu/vulkan/SDL_gpu_vulkan.c | 46 ++++++++++++++++++++-------------
+ 1 file changed, 28 insertions(+), 18 deletions(-)
+
+diff --git a/src/gpu/vulkan/SDL_gpu_vulkan.c b/src/gpu/vulkan/SDL_gpu_vulkan.c
+index 15d8743ca909f01aa095dc04828c189af4b0f68e..5a97bbd9f57a21a3105800a7862613d83aef702b 100644
+--- a/src/gpu/vulkan/SDL_gpu_vulkan.c
++++ b/src/gpu/vulkan/SDL_gpu_vulkan.c
+@@ -1080,7 +1080,6 @@ typedef struct VulkanCommandBuffer
+     Sint32 usedUniformBufferCapacity;
+ 
+     VulkanFenceHandle *inFlightFence;
+-    bool autoReleaseFence;
+ 
+     bool swapchainRequested;
+     bool isDefrag; // Whether this CB was created for defragging
+@@ -9738,8 +9737,6 @@ static SDL_GPUCommandBuffer *VULKAN_AcquireCommandBuffer(
+     SDL_zeroa(commandBuffer->readOnlyComputeStorageTextures);
+     SDL_zeroa(commandBuffer->readOnlyComputeStorageBuffers);
+ 
+-    commandBuffer->autoReleaseFence = true;
+-
+     commandBuffer->swapchainRequested = false;
+     commandBuffer->isDefrag = 0;
+ 
+@@ -10579,7 +10576,8 @@ static void VULKAN_INTERNAL_CleanCommandBuffer(
+     VulkanCommandBuffer *commandBuffer,
+     bool cancel)
+ {
+-    if (commandBuffer->autoReleaseFence) {
++    // Release the command buffer's reference to the fence. A canceled command buffer has none.
++    if (commandBuffer->inFlightFence) {
+         VULKAN_ReleaseFence(
+             (SDL_GPURenderer *)renderer,
+             (SDL_GPUFence *)commandBuffer->inFlightFence);
+@@ -10770,17 +10768,6 @@ static bool VULKAN_Wait(
+     return true;
+ }
+ 
+-static SDL_GPUFence *VULKAN_SubmitAndAcquireFence(
+-    SDL_GPUCommandBuffer *commandBuffer)
+-{
+-    VulkanCommandBuffer *vulkanCommandBuffer = (VulkanCommandBuffer *)commandBuffer;
+-    vulkanCommandBuffer->autoReleaseFence = false;
+-    if (!VULKAN_Submit(commandBuffer)) {
+-        return NULL;
+-    }
+-    return (SDL_GPUFence *)vulkanCommandBuffer->inFlightFence;
+-}
+-
+ static void VULKAN_INTERNAL_ReleaseCommandBuffer(VulkanCommandBuffer *vulkanCommandBuffer)
+ {
+     VulkanRenderer *renderer = vulkanCommandBuffer->renderer;
+@@ -10797,8 +10784,9 @@ static void VULKAN_INTERNAL_ReleaseCommandBuffer(VulkanCommandBuffer *vulkanComm
+     renderer->submittedCommandBufferCount += 1;
+ }
+ 
+-static bool VULKAN_Submit(
+-    SDL_GPUCommandBuffer *commandBuffer)
++static bool VULKAN_INTERNAL_Submit(
++    SDL_GPUCommandBuffer *commandBuffer,
++    SDL_GPUFence **fence)
+ {
+     VulkanCommandBuffer *vulkanCommandBuffer = (VulkanCommandBuffer *)commandBuffer;
+     VulkanRenderer *renderer = vulkanCommandBuffer->renderer;
+@@ -10988,6 +10976,13 @@ static bool VULKAN_Submit(
+ 
+     VULKAN_INTERNAL_PerformPendingDestroys(renderer);
+ 
++    // Give the caller its own reference while submitLock is held, another
++    // thread could clean this command buffer as soon as the lock is released.
++    if (fence) {
++        (void)SDL_AtomicIncRef(&vulkanCommandBuffer->inFlightFence->referenceCount);
++        *fence = (SDL_GPUFence *)vulkanCommandBuffer->inFlightFence;
++    }
++
+     // Mark command buffer as submitted
+     VULKAN_INTERNAL_ReleaseCommandBuffer(vulkanCommandBuffer);
+ 
+@@ -10996,6 +10991,22 @@ static bool VULKAN_Submit(
+     return true;
+ }
+ 
++static bool VULKAN_Submit(
++    SDL_GPUCommandBuffer *commandBuffer)
++{
++    return VULKAN_INTERNAL_Submit(commandBuffer, NULL);
++}
++
++static SDL_GPUFence *VULKAN_SubmitAndAcquireFence(
++    SDL_GPUCommandBuffer *commandBuffer)
++{
++    SDL_GPUFence *fence = NULL;
++    if (!VULKAN_INTERNAL_Submit(commandBuffer, &fence)) {
++        return NULL;
++    }
++    return fence;
++}
++
+ static bool VULKAN_Cancel(
+     SDL_GPUCommandBuffer *commandBuffer)
+ {
+@@ -11015,7 +11026,6 @@ static bool VULKAN_Cancel(
+         VK_COMMAND_BUFFER_RESET_RELEASE_RESOURCES_BIT);
+     CHECK_VULKAN_ERROR_AND_RETURN(result, vkResetCommandBuffer, false);
+ 
+-    vulkanCommandBuffer->autoReleaseFence = false;
+     SDL_LockMutex(renderer->submitLock);
+     VULKAN_INTERNAL_CleanCommandBuffer(renderer, vulkanCommandBuffer, true);
+     SDL_UnlockMutex(renderer->submitLock);
