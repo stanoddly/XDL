@@ -33,7 +33,7 @@ An adopted device gets no device-lost callback, because WebGPU takes that callba
 
 ## Linking
 
-`SDL3::SDL3-static` carries `--use-port=emdawnwebgpu` in its link interface. An app that links the archive directly must pass that flag itself.
+`SDL3::SDL3-static` carries `--use-port=emdawnwebgpu` in its link interface. An app that links the archive directly must pass that flag itself, or link the prebuilt `emdawnwebgpu.a` and JavaScript libraries of the browser zip instead, as a .NET app does (see the [README](../../README.md#browser)). The port compiles into the Emscripten cache at link time, so it needs a writable cache.
 
 ## Testing
 

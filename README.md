@@ -46,6 +46,9 @@ Reference the archives with `NativeFileReference` and keep their file names. The
 <ItemGroup>
   <NativeFileReference Include="native/XDL3.a;native/XDL3_image.a;native/XDL3_mixer.a;native/XDL3_ttf.a" />
   <NativeFileReference Include="native/emdawnwebgpu.a" ScanForPInvokes="false" />
+  <!-- For the page to create the WebGPU instance, adapter and device that it hands to XDL. -->
+  <EmccExportedRuntimeMethod Include="WebGPU" />
+  <EmccExportedFunction Include="_wgpuCreateInstance" />
 </ItemGroup>
 <PropertyGroup>
   <EmccExtraLDFlags>--js-library native/library_webgpu_enum_tables.js --js-library native/library_webgpu_generated_struct_info.js --js-library native/library_webgpu_generated_sig_info.js --js-library native/library_webgpu.js</EmccExtraLDFlags>

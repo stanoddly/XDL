@@ -47,9 +47,10 @@ if [[ "$rid" == browser-* ]]; then
   [[ -f "$install_prefix/lib/libemdawnwebgpu.a" ]] || die "$install_prefix/lib/libemdawnwebgpu.a does not exist."
   cp "$install_prefix/lib/libemdawnwebgpu.a" "$out_dir/emdawnwebgpu.a"
   copies+=("$out_dir/emdawnwebgpu.a")
-  for file in "$install_prefix/share/emdawnwebgpu"/*.js; do
-    cp "$file" "$out_dir/"
-    copies+=("$out_dir/$(basename "$file")")
+  for library in library_webgpu_enum_tables.js library_webgpu_generated_struct_info.js library_webgpu_generated_sig_info.js library_webgpu.js; do
+    [[ -f "$install_prefix/share/emdawnwebgpu/$library" ]] || die "$install_prefix/share/emdawnwebgpu/$library does not exist."
+    cp "$install_prefix/share/emdawnwebgpu/$library" "$out_dir/"
+    copies+=("$out_dir/$library")
   done
 fi
 

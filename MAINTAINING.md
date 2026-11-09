@@ -88,7 +88,7 @@ Other platforms compile some sources that Linux x64 does not, such as Windows an
 - Emscripten pins the Dawn version of the emdawnwebgpu port, so a new Emscripten can change the `webgpu.h` that the WebGPU backend compiles against. A compile error in `SDL_gpu_webgpu.c` after a .NET update is the first sign. `tools/build-browser.sh` fails when the header's license text no longer matches `LICENSES/webgpu-native-BSD-3-Clause.txt`.
 - The exception flags in `tools/build-browser.sh`, `-fwasm-exceptions -sWASM_LEGACY_EXCEPTIONS=0`, match the .NET runtime's. Change them, and the release notes in `release.yml`, if .NET changes its exception handling.
 - A new .NET major version needs a target of its own, such as `browser-wasm-net12`: a copy of the job with its `dotnet-version` and artifact name, and a `TargetFramework` for `tests/browser-dotnet`.
-- `tools/build-emdawnwebgpu.sh` compiles `webgpu.cpp` from the port that XDL3 compiled against, with the port's flags. Compare them with `emdawnwebgpu.port.py` in the port when Emscripten pins a new Dawn version. It fails when the port's license text no longer matches `LICENSES/emdawnwebgpu-Emscripten-MIT-NCSA.txt`.
+- `tools/build-emdawnwebgpu.sh` compiles `webgpu.cpp` from the port that XDL3 compiled against, with the port's flags. Compare them with `emdawnwebgpu.port.py` in the port when Emscripten pins a new Dawn version. It fails when the port's license texts no longer match `LICENSES/emdawnwebgpu-Emscripten-MIT-NCSA.txt` and `LICENSES/Dawn-BSD-3-Clause.txt`.
 - The link test sets no `WasmCachePath`, so it links with the workload's read-only cache, as an app does. CI runs it in a shell without `emsdk-env.sh`.
 
 ## Marking a build
