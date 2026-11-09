@@ -1,0 +1,71 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: botoddly <250804054+botoddly@users.noreply.github.com>
+Date: Mon, 9 Nov 2026 17:41:36 +0100
+Subject: [PATCH] gpu-acquired-fence-reference: Release each fence in
+ testgpucleanup as soon as it signals
+
+---
+ test/testgpucleanup.c | 15 +++++----------
+ 1 file changed, 5 insertions(+), 10 deletions(-)
+
+diff --git a/test/testgpucleanup.c b/test/testgpucleanup.c
+index ed5b0246368fa2987085a37fdffb7e39e488c2ac..2c014b570980f1350d9c56a417b44c0e7550b024 100644
+--- a/test/testgpucleanup.c
++++ b/test/testgpucleanup.c
+@@ -13,7 +13,7 @@
+ /* Uploads through a cycled transfer buffer with a window claimed, without ever requesting a swapchain texture.
+  * Each upload waits until the previous one has finished, so a backend that frees finished work on every submit
+  * alternates between at most two transfer buffers. A backend that waits for a frame creates a new one every time.
+- * Fences are kept until the end, because a released fence can be reused while a command buffer still points to it.
++ * Each fence is released as soon as it signals, so a backend that reuses a fence its command buffer still points to fails too.
+  */
+ 
+ #include <SDL3/SDL.h>
+@@ -29,7 +29,6 @@ int main(int argc, char *argv[])
+     SDL_GPUDevice *device = NULL;
+     SDL_GPUBuffer *buffer = NULL;
+     SDL_GPUTransferBuffer *transfer = NULL;
+-    SDL_GPUFence *fences[UPLOAD_COUNT] = { NULL };
+     void *mappings[UPLOAD_COUNT];
+     int mapping_count = 0;
+     int result = 1;
+@@ -79,8 +78,8 @@ int main(int argc, char *argv[])
+         SDL_GPUBufferRegion destination = { .buffer = buffer, .size = UPLOAD_SIZE };
+         SDL_UploadToGPUBuffer(copy_pass, &source, &destination, true);
+         SDL_EndGPUCopyPass(copy_pass);
+-        fences[i] = SDL_SubmitGPUCommandBufferAndAcquireFence(cmd);
+-        if (!fences[i]) {
++        SDL_GPUFence *fence = SDL_SubmitGPUCommandBufferAndAcquireFence(cmd);
++        if (!fence) {
+             SDL_Log("SDL_SubmitGPUCommandBufferAndAcquireFence failed: %s", SDL_GetError());
+             goto quit;
+         }
+@@ -89,7 +88,7 @@ int main(int argc, char *argv[])
+         // A failed query returns false like an unfinished fence, so only the error tells them apart.
+         Uint64 deadline = SDL_GetTicksNS() + UPLOAD_TIMEOUT_NS;
+         SDL_ClearError();
+-        while (!SDL_QueryGPUFence(device, fences[i])) {
++        while (!SDL_QueryGPUFence(device, fence)) {
+             // Cleanup waits for the GPU, which would hang if it is stuck or lost, so leave the resources to process exit.
+             if (*SDL_GetError() || SDL_GetTicksNS() > deadline) {
+                 SDL_Log("Upload %d did not finish: %s", i, *SDL_GetError() ? SDL_GetError() : "timed out after 5 seconds");
+@@ -98,6 +97,7 @@ int main(int argc, char *argv[])
+             }
+             SDL_Delay(1);
+         }
++        SDL_ReleaseGPUFence(device, fence);
+     }
+ 
+     SDL_Log("Distinct transfer buffer mappings in %d uploads: %d", UPLOAD_COUNT, mapping_count);
+@@ -105,11 +105,6 @@ int main(int argc, char *argv[])
+ 
+ quit:
+     if (device) {
+-        for (int i = 0; i < UPLOAD_COUNT; i++) {
+-            if (fences[i]) {
+-                SDL_ReleaseGPUFence(device, fences[i]);
+-            }
+-        }
+         SDL_ReleaseGPUTransferBuffer(device, transfer);
+         SDL_ReleaseGPUBuffer(device, buffer);
+         if (window) {
