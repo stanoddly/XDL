@@ -1,6 +1,6 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: botoddly <250804054+botoddly@users.noreply.github.com>
-Date: Mon, 9 Nov 2026 22:02:36 +0100
+Date: Mon, 9 Nov 2026 22:12:37 +0100
 Subject: [PATCH] window-input-region: Implement on Windows
 
 ---
@@ -9,20 +9,21 @@ Subject: [PATCH] window-input-region: Implement on Windows
  VisualC/SDL/SDL.vcxproj                    |   2 +
  VisualC/SDL/SDL.vcxproj.filters            |   6 +
  src/video/windows/SDL_windowsevents.c      |  13 +
- src/video/windows/SDL_windowsinputregion.c | 622 +++++++++++++++++++++
- src/video/windows/SDL_windowsinputregion.h |  34 ++
+ src/video/windows/SDL_windowsinputregion.c | 456 +++++++++++++++++++++
+ src/video/windows/SDL_windowsinputregion.h |  36 ++
+ src/video/windows/SDL_windowsmousehook.c   |   5 +
  src/video/windows/SDL_windowsshape.c       |   4 +-
  src/video/windows/SDL_windowsshape.h       |   2 +
  src/video/windows/SDL_windowsvideo.c       |   3 +
  src/video/windows/SDL_windowsvideo.h       |   1 +
  src/video/windows/SDL_windowswindow.c      |   5 +
  src/video/windows/SDL_windowswindow.h      |   2 +-
- 13 files changed, 695 insertions(+), 3 deletions(-)
+ 14 files changed, 536 insertions(+), 3 deletions(-)
  create mode 100644 src/video/windows/SDL_windowsinputregion.c
  create mode 100644 src/video/windows/SDL_windowsinputregion.h
 
 diff --git a/VisualC-GDK/SDL/SDL.vcxproj b/VisualC-GDK/SDL/SDL.vcxproj
-index 3ba75f81398f9ded4e2fb6f1f32779192b6bb380..d1d452ad600affd93a6a10a0c5341e8fe7396e21 100644
+index e7f4b94479eb536e3146fb90a6f7cc2b562ab839..3d6cd01703a5a9191605764b255bd2af332bf2f6 100644
 --- a/VisualC-GDK/SDL/SDL.vcxproj
 +++ b/VisualC-GDK/SDL/SDL.vcxproj
 @@ -621,6 +621,7 @@
@@ -30,19 +31,19 @@ index 3ba75f81398f9ded4e2fb6f1f32779192b6bb380..d1d452ad600affd93a6a10a0c5341e8f
      <ClInclude Include="..\..\src\video\windows\SDL_windowsmodes.h" />
      <ClInclude Include="..\..\src\video\windows\SDL_windowsmouse.h" />
 +    <ClInclude Include="..\..\src\video\windows\SDL_windowsinputregion.h" />
+     <ClInclude Include="..\..\src\video\windows\SDL_windowsmousehook.h" />
      <ClInclude Include="..\..\src\video\windows\SDL_windowsmousepassthrough.h" />
      <ClInclude Include="..\..\src\video\windows\SDL_windowsopengl.h" />
-     <ClInclude Include="..\..\src\video\windows\SDL_windowsopengles.h" />
-@@ -910,6 +911,7 @@
+@@ -911,6 +912,7 @@
      <ClCompile Include="..\..\src\video\windows\SDL_windowsmessagebox.c" />
      <ClCompile Include="..\..\src\video\windows\SDL_windowsmodes.c" />
      <ClCompile Include="..\..\src\video\windows\SDL_windowsmouse.c" />
 +    <ClCompile Include="..\..\src\video\windows\SDL_windowsinputregion.c" />
+     <ClCompile Include="..\..\src\video\windows\SDL_windowsmousehook.c" />
      <ClCompile Include="..\..\src\video\windows\SDL_windowsmousepassthrough.c" />
      <ClCompile Include="..\..\src\video\windows\SDL_windowsopengl.c" />
-     <ClCompile Include="..\..\src\video\windows\SDL_windowsopengles.c" />
 diff --git a/VisualC-GDK/SDL/SDL.vcxproj.filters b/VisualC-GDK/SDL/SDL.vcxproj.filters
-index ad9e3c30114352383a738fd8c6a9dd028878cc47..edf3515f8f44da43637a2464af1122ada0a9e6e1 100644
+index 29a0d2efef659fc51cd75bfd733c711e8070405c..12de1e806c49a35368de1425988d290e974ebcf8 100644
 --- a/VisualC-GDK/SDL/SDL.vcxproj.filters
 +++ b/VisualC-GDK/SDL/SDL.vcxproj.filters
 @@ -203,6 +203,7 @@
@@ -50,19 +51,19 @@ index ad9e3c30114352383a738fd8c6a9dd028878cc47..edf3515f8f44da43637a2464af1122ad
      <ClCompile Include="..\..\src\video\windows\SDL_windowsmodes.c" />
      <ClCompile Include="..\..\src\video\windows\SDL_windowsmouse.c" />
 +    <ClCompile Include="..\..\src\video\windows\SDL_windowsinputregion.c" />
+     <ClCompile Include="..\..\src\video\windows\SDL_windowsmousehook.c" />
      <ClCompile Include="..\..\src\video\windows\SDL_windowsmousepassthrough.c" />
      <ClCompile Include="..\..\src\video\windows\SDL_windowsopengl.c" />
-     <ClCompile Include="..\..\src\video\windows\SDL_windowsopengles.c" />
-@@ -480,6 +481,7 @@
+@@ -481,6 +482,7 @@
      <ClInclude Include="..\..\src\video\windows\SDL_windowsmessagebox.h" />
      <ClInclude Include="..\..\src\video\windows\SDL_windowsmodes.h" />
      <ClInclude Include="..\..\src\video\windows\SDL_windowsmouse.h" />
 +    <ClInclude Include="..\..\src\video\windows\SDL_windowsinputregion.h" />
+     <ClInclude Include="..\..\src\video\windows\SDL_windowsmousehook.h" />
      <ClInclude Include="..\..\src\video\windows\SDL_windowsmousepassthrough.h" />
      <ClInclude Include="..\..\src\video\windows\SDL_windowsopengl.h" />
-     <ClInclude Include="..\..\src\video\windows\SDL_windowsopengles.h" />
 diff --git a/VisualC/SDL/SDL.vcxproj b/VisualC/SDL/SDL.vcxproj
-index 3053fdfe0ec3ed0e2989000072720410d70a5cec..90c38340779bf57c5a7adc68d9c10f55156abfb2 100644
+index 11471d38ba45c5ac7fd48a6474952add9d595421..c87dc8e31062ff7941cc06d5a1ee183619c040c5 100644
 --- a/VisualC/SDL/SDL.vcxproj
 +++ b/VisualC/SDL/SDL.vcxproj
 @@ -530,6 +530,7 @@
@@ -70,19 +71,19 @@ index 3053fdfe0ec3ed0e2989000072720410d70a5cec..90c38340779bf57c5a7adc68d9c10f55
      <ClInclude Include="..\..\src\video\windows\SDL_windowsmodes.h" />
      <ClInclude Include="..\..\src\video\windows\SDL_windowsmouse.h" />
 +    <ClInclude Include="..\..\src\video\windows\SDL_windowsinputregion.h" />
+     <ClInclude Include="..\..\src\video\windows\SDL_windowsmousehook.h" />
      <ClInclude Include="..\..\src\video\windows\SDL_windowsmousepassthrough.h" />
      <ClInclude Include="..\..\src\video\windows\SDL_windowsopengl.h" />
-     <ClInclude Include="..\..\src\video\windows\SDL_windowsopengles.h" />
-@@ -771,6 +772,7 @@
+@@ -772,6 +773,7 @@
      <ClCompile Include="..\..\src\video\windows\SDL_windowsmessagebox.c" />
      <ClCompile Include="..\..\src\video\windows\SDL_windowsmodes.c" />
      <ClCompile Include="..\..\src\video\windows\SDL_windowsmouse.c" />
 +    <ClCompile Include="..\..\src\video\windows\SDL_windowsinputregion.c" />
+     <ClCompile Include="..\..\src\video\windows\SDL_windowsmousehook.c" />
      <ClCompile Include="..\..\src\video\windows\SDL_windowsmousepassthrough.c" />
      <ClCompile Include="..\..\src\video\windows\SDL_windowsopengl.c" />
-     <ClCompile Include="..\..\src\video\windows\SDL_windowsopengles.c" />
 diff --git a/VisualC/SDL/SDL.vcxproj.filters b/VisualC/SDL/SDL.vcxproj.filters
-index 8e0e8a95ecb8238cdad66d67f840ccc0b0a2cadd..e4f3f63b8bf6f26f7d4b6de4e83d6e2d10fe3edb 100644
+index f54a549f4cf7275774155f5140549a13167d93d8..d0489122beeda75193b42d9a7151bdb4e8cb440b 100644
 --- a/VisualC/SDL/SDL.vcxproj.filters
 +++ b/VisualC/SDL/SDL.vcxproj.filters
 @@ -786,6 +786,9 @@
@@ -92,17 +93,17 @@ index 8e0e8a95ecb8238cdad66d67f840ccc0b0a2cadd..e4f3f63b8bf6f26f7d4b6de4e83d6e2d
 +    <ClInclude Include="..\..\src\video\windows\SDL_windowsinputregion.h">
 +      <Filter>video\windows</Filter>
 +    </ClInclude>
-     <ClInclude Include="..\..\src\video\windows\SDL_windowsmousepassthrough.h">
+     <ClInclude Include="..\..\src\video\windows\SDL_windowsmousehook.h">
        <Filter>video\windows</Filter>
      </ClInclude>
-@@ -1446,6 +1449,9 @@
+@@ -1449,6 +1452,9 @@
      <ClCompile Include="..\..\src\video\windows\SDL_windowsmouse.c">
        <Filter>video\windows</Filter>
      </ClCompile>
 +    <ClCompile Include="..\..\src\video\windows\SDL_windowsinputregion.c">
 +      <Filter>video\windows</Filter>
 +    </ClCompile>
-     <ClCompile Include="..\..\src\video\windows\SDL_windowsmousepassthrough.c">
+     <ClCompile Include="..\..\src\video\windows\SDL_windowsmousehook.c">
        <Filter>video\windows</Filter>
      </ClCompile>
 diff --git a/src/video/windows/SDL_windowsevents.c b/src/video/windows/SDL_windowsevents.c
@@ -152,10 +153,10 @@ index 9bf8089394492b9b3d8c607ff754933d9b1bdcdd..83894ed2198720c318cc9bda11ce19f9
         You won't get a KEYUP until both are released, and that keyup will only be for the second
 diff --git a/src/video/windows/SDL_windowsinputregion.c b/src/video/windows/SDL_windowsinputregion.c
 new file mode 100644
-index 0000000000000000000000000000000000000000..416675b201617cc7aaf620035b21002516a92780
+index 0000000000000000000000000000000000000000..42d90b3efbca905a9fa52dceb867497187a9356a
 --- /dev/null
 +++ b/src/video/windows/SDL_windowsinputregion.c
-@@ -0,0 +1,622 @@
+@@ -0,0 +1,456 @@
 +/*
 +  Simple DirectMedia Layer
 +  Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
@@ -182,14 +183,14 @@ index 0000000000000000000000000000000000000000..416675b201617cc7aaf620035b210025
 +
 +#include "SDL_windowsvideo.h"
 +#include "SDL_windowsinputregion.h"
++#include "SDL_windowsmousehook.h"
 +#include "SDL_windowsshape.h"
 +#include "../../events/SDL_mouse_c.h"
 +
-+/* Windows has no input region that leaves what a window shows alone. So a window with an input region lets all mouse input through, and a
-+   low-level mouse hook keeps the left button presses in the region, and their releases, from the windows beneath. Windows holds each mouse
-+   event, for the whole system, until the hook returns. So the hook runs on its own thread with its own message loop. It decides, as the input
-+   happens, whether a press is in a window's region, and queues the presses it blocks and their releases; it holds the lock only to read the
-+   regions and to queue. The event pump reports the queued input on the main thread. */
++/* Windows has no input region that leaves what a window shows alone. So a window with an input region lets all mouse input through, and the
++   mouse hook keeps the left button presses in the region, and their releases, from the windows beneath. It decides, as the input happens,
++   whether a press is in a window's region, and queues the presses it blocks and their releases; it holds the lock only to read the regions
++   and to queue. The event pump reports the queued input on the main thread. */
 +
 +typedef struct
 +{
@@ -221,50 +222,15 @@ index 0000000000000000000000000000000000000000..416675b201617cc7aaf620035b210025
 +// The z-order can change during the walk up from a window, so the walk is bounded.
 +#define MAX_WINDOWS_ABOVE 4096
 +
++// Guarded by the mouse hook's lock. Only the main thread changes windows and num_windows, so it reads them without the lock.
 +static struct
 +{
-+    // Guards windows, num_windows, queue, num_queued and queue_capacity, which the hook thread reads and writes. Only the main thread changes
-+    // windows and num_windows, so it reads them without the lock.
-+    SDL_Mutex *lock;
 +    RegionWindow *windows;
 +    int num_windows;
 +    QueuedButton *queue;
 +    int num_queued;
 +    int queue_capacity;
-+
-+    // The last window is leaving the hook. Waiting for the thread handles sent messages, which can run SDL and application code.
-+    bool stopping;
-+    // The thread with the SDL windows, which reports the input. It is woken with a thread message, because a window can be recreated.
-+    DWORD main_thread_id;
-+    HANDLE thread;
-+    HANDLE ready_event;
-+    HANDLE stop_event;
-+    HHOOK hook;
-+    DWORD hook_error;
-+    UINT wake_message;
-+    // The hook reports physical coordinates, so its thread is per-monitor DPI aware for hit testing, whatever the process is.
-+    DPI_AWARENESS_CONTEXT (WINAPI *SetThreadDpiAwarenessContext)(DPI_AWARENESS_CONTEXT);
 +} input_region;
-+
-+// The hook reports the requested position, which can lie past a screen edge or the cursor clip rectangle; the cursor itself stays inside both.
-+static POINT ClampToCursorArea(POINT pt)
-+{
-+    HMONITOR monitor = MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
-+    MONITORINFO info;
-+    RECT clip;
-+
-+    SDL_zero(info);
-+    info.cbSize = sizeof(info);
-+    if (monitor && GetMonitorInfo(monitor, &info)) {
-+        pt.x = SDL_clamp(pt.x, info.rcMonitor.left, info.rcMonitor.right - 1);
-+        pt.y = SDL_clamp(pt.y, info.rcMonitor.top, info.rcMonitor.bottom - 1);
-+    }
-+    if (GetClipCursor(&clip)) {
-+        pt.x = SDL_clamp(pt.x, clip.left, clip.right - 1);
-+        pt.y = SDL_clamp(pt.y, clip.top, clip.bottom - 1);
-+    }
-+    return pt;
-+}
 +
 +// Call it with the lock held.
 +static RegionWindow *FindWindowByID(SDL_WindowID window_id)
@@ -372,9 +338,9 @@ index 0000000000000000000000000000000000000000..416675b201617cc7aaf620035b210025
 +    button->x = x;
 +    button->y = y;
 +
-+    // Wake the event loop once per batch, so SDL_WaitEvent() returns. PostThreadMessage() does not wait.
++    // Wake the event loop once per batch.
 +    if (input_region.num_queued == 1) {
-+        PostThreadMessage(input_region.main_thread_id, input_region.wake_message, 0, 0);
++        WIN_WakeForMouseHookInput();
 +    }
 +    return true;
 +}
@@ -387,12 +353,12 @@ index 0000000000000000000000000000000000000000..416675b201617cc7aaf620035b210025
 +    bool blocked = false;
 +    float x = 0.0f, y = 0.0f;
 +
-+    SDL_LockMutex(input_region.lock);
++    WIN_LockMouseHook();
 +    window = FindWindowAt(pt, &x, &y);
 +    if (window) {
 +        hwnd = window->hwnd;
 +    }
-+    SDL_UnlockMutex(input_region.lock);
++    WIN_UnlockMouseHook();
 +
 +    // Hit testing runs outside the lock, so the main thread never waits for it.
 +    if (!hwnd || IsCoveredAt(hwnd, pt)) {
@@ -400,13 +366,13 @@ index 0000000000000000000000000000000000000000..416675b201617cc7aaf620035b210025
 +    }
 +
 +    // The window may have left the hook meanwhile.
-+    SDL_LockMutex(input_region.lock);
++    WIN_LockMouseHook();
 +    window = FindWindowByHWND(hwnd);
 +    if (window && QueueButton(window, true, x, y)) {
 +        window->pressed = true;
 +        blocked = true;
 +    }
-+    SDL_UnlockMutex(input_region.lock);
++    WIN_UnlockMouseHook();
 +    return blocked;
 +}
 +
@@ -416,7 +382,7 @@ index 0000000000000000000000000000000000000000..416675b201617cc7aaf620035b210025
 +    bool blocked = false;
 +    int i;
 +
-+    SDL_LockMutex(input_region.lock);
++    WIN_LockMouseHook();
 +    for (i = 0; i < input_region.num_windows; ++i) {
 +        RegionWindow *window = &input_region.windows[i];
 +        if (window->pressed) {
@@ -429,146 +395,20 @@ index 0000000000000000000000000000000000000000..416675b201617cc7aaf620035b210025
 +            break;
 +        }
 +    }
-+    SDL_UnlockMutex(input_region.lock);
++    WIN_UnlockMouseHook();
 +    return blocked;
 +}
 +
-+static LRESULT CALLBACK WIN_InputRegionHookProc(int nCode, WPARAM wParam, LPARAM lParam)
++bool WIN_HandleInputRegionHookInput(UINT message, POINT pt)
 +{
-+    if (nCode == HC_ACTION && (wParam == WM_LBUTTONDOWN || wParam == WM_LBUTTONUP)) {
-+        const MSLLHOOKSTRUCT *info = (const MSLLHOOKSTRUCT *)lParam;
-+
-+        // Touch and pens generate mouse input too, and the hook leaves it alone.
-+        if (WIN_GetMouseMessageSource((ULONG)info->dwExtraInfo) == SDL_MOUSE_EVENT_SOURCE_MOUSE) {
-+            const POINT pt = ClampToCursorArea(info->pt);
-+            const bool blocked = (wParam == WM_LBUTTONDOWN) ? BlockPress(pt) : BlockRelease(pt);
-+            if (blocked) {
-+                return 1;
-+            }
-+        }
-+    }
-+    return CallNextHookEx(NULL, nCode, wParam, lParam);
-+}
-+
-+static DWORD WINAPI WIN_InputRegionThread(LPVOID param)
-+{
-+    HMODULE module;
-+    MSG msg;
-+
-+    // Windows silently removes a low-level hook that does not return in time.
-+    SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL);
-+    if (input_region.SetThreadDpiAwarenessContext) {
-+        input_region.SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
-+    }
-+
-+    // SetWindowsHookEx() needs the module with the hook, and SDL can be linked statically or dynamically.
-+    if (GetModuleHandleEx(GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT | GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, (LPTSTR)WIN_InputRegionHookProc, &module)) {
-+        input_region.hook = SetWindowsHookEx(WH_MOUSE_LL, WIN_InputRegionHookProc, module, 0);
-+    }
-+    input_region.hook_error = input_region.hook ? 0 : GetLastError();
-+    SetEvent(input_region.ready_event);
-+    if (!input_region.hook) {
-+        return 0;
-+    }
-+
-+    // Windows calls the hook while this thread retrieves messages.
-+    for (;;) {
-+        const DWORD result = MsgWaitForMultipleObjects(1, &input_region.stop_event, FALSE, INFINITE, QS_ALLINPUT);
-+        if (result != WAIT_OBJECT_0 + 1) {
-+            break;
-+        }
-+        while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
-+        }
-+    }
-+
-+    UnhookWindowsHookEx(input_region.hook);
-+    input_region.hook = NULL;
-+    return 0;
-+}
-+
-+static void StopThread(void)
-+{
-+    if (input_region.thread) {
-+        HANDLE thread = input_region.thread;
-+        SetEvent(input_region.stop_event);
-+        // Handle messages sent to this thread while waiting, so a hook call that sent one can finish.
-+        while (MsgWaitForMultipleObjects(1, &thread, FALSE, INFINITE, QS_SENDMESSAGE) == WAIT_OBJECT_0 + 1) {
-+            MSG msg;
-+            PeekMessage(&msg, NULL, 0, 0, PM_NOREMOVE | PM_QS_SENDMESSAGE);
-+        }
-+        CloseHandle(thread);
-+        input_region.thread = NULL;
-+    }
-+    if (input_region.ready_event) {
-+        CloseHandle(input_region.ready_event);
-+        input_region.ready_event = NULL;
-+    }
-+    if (input_region.stop_event) {
-+        CloseHandle(input_region.stop_event);
-+        input_region.stop_event = NULL;
-+    }
-+    input_region.hook = NULL;
-+}
-+
-+static bool StartThread(SDL_VideoDevice *_this)
-+{
-+    input_region.SetThreadDpiAwarenessContext = _this->internal->SetThreadDpiAwarenessContext;
-+    input_region.ready_event = CreateEvent(NULL, FALSE, FALSE, NULL);
-+    input_region.stop_event = CreateEvent(NULL, TRUE, FALSE, NULL);
-+    if (!input_region.ready_event || !input_region.stop_event) {
-+        WIN_SetError("CreateEvent()");
-+        StopThread();
++    switch (message) {
++    case WM_LBUTTONDOWN:
++        return BlockPress(pt);
++    case WM_LBUTTONUP:
++        return BlockRelease(pt);
++    default:
 +        return false;
 +    }
-+
-+    input_region.thread = CreateThread(NULL, 0, WIN_InputRegionThread, NULL, 0, NULL);
-+    if (!input_region.thread) {
-+        WIN_SetError("CreateThread()");
-+        StopThread();
-+        return false;
-+    }
-+
-+    WaitForSingleObject(input_region.ready_event, INFINITE);
-+    if (!input_region.hook) {
-+        // The thread exits on its own when the hook fails.
-+        const DWORD error = input_region.hook_error;
-+        StopThread();
-+        SetLastError(error);
-+        return WIN_SetError("SetWindowsHookEx()");
-+    }
-+    return true;
-+}
-+
-+// Frees everything once no window is on the hook and the thread is stopped.
-+static void Cleanup(void)
-+{
-+    SDL_free(input_region.windows);
-+    SDL_free(input_region.queue);
-+    SDL_DestroyMutex(input_region.lock);
-+    SDL_zero(input_region);
-+}
-+
-+static bool StartHook(SDL_VideoDevice *_this)
-+{
-+    input_region.lock = SDL_CreateMutex();
-+    if (!input_region.lock) {
-+        return false;
-+    }
-+    input_region.wake_message = RegisterWindowMessage(TEXT("SDL_InputRegionWake"));
-+    input_region.main_thread_id = GetCurrentThreadId();
-+    if (!StartThread(_this)) {
-+        Cleanup();
-+        return false;
-+    }
-+    return true;
-+}
-+
-+static void StopHook(void)
-+{
-+    // The hook takes the lock, so nothing here holds it while waiting for the thread.
-+    input_region.stopping = true;
-+    StopThread();
-+    Cleanup();
 +}
 +
 +/* Where the window's client area is in the physical screen coordinates the hook reports, and how they map to window coordinates. The window's
@@ -644,96 +484,91 @@ index 0000000000000000000000000000000000000000..416675b201617cc7aaf620035b210025
 +        return WIN_SetError("SetWindowRgn()");
 +    }
 +
-+    // Only the window leaving the hook runs code during the stop, and it doesn't come back.
-+    if (input_region.stopping) {
-+        return SDL_SetError("The input region hook is stopping");
-+    }
-+    if (input_region.num_windows == 0 && !StartHook(_this)) {
-+        return false;
++    // Each window with a region holds the hook.
++    entry = FindWindowByID(window->id);
++    if (!entry) {
++        if (!WIN_AcquireMouseHook(_this)) {
++            return false;
++        }
++        WIN_LockMouseHook();
++        entry = AddWindow(window);
++        WIN_UnlockMouseHook();
++        if (!entry) {
++            WIN_ReleaseMouseHook();
++            return false;
++        }
 +    }
 +
 +    GetPlacement(window, &origin, &scale_x, &scale_y);
 +
-+    SDL_LockMutex(input_region.lock);
-+    entry = FindWindowByID(window->id);
-+    if (!entry) {
-+        entry = AddWindow(window);
-+    }
-+    if (entry && count > entry->rects_capacity) {
++    WIN_LockMouseHook();
++    if (count > entry->rects_capacity) {
 +        SDL_Rect *grown = (SDL_Rect *)SDL_realloc(entry->rects, count * sizeof(*grown));
 +        if (grown) {
 +            entry->rects = grown;
 +            entry->rects_capacity = count;
 +        } else {
-+            entry = NULL;
++            result = false;
 +        }
 +    }
-+    if (entry) {
++    if (result) {
 +        // A count of 0 only empties the region, so a press the hook blocked still has its release blocked and reported.
 +        if (count > 0) {
 +            SDL_memcpy(entry->rects, rects, count * sizeof(*rects));
 +        }
 +        entry->num_rects = count;
-+        entry->hwnd = data->hwnd;
-+        entry->origin = origin;
-+        entry->scale_x = scale_x;
-+        entry->scale_y = scale_y;
-+    } else {
-+        result = false;
 +    }
-+    SDL_UnlockMutex(input_region.lock);
-+
-+    // The hook started for a window that couldn't be added.
-+    if (input_region.num_windows == 0) {
-+        StopHook();
-+    }
++    entry->hwnd = data->hwnd;
++    entry->origin = origin;
++    entry->scale_x = scale_x;
++    entry->scale_y = scale_y;
++    WIN_UnlockMouseHook();
 +    return result;
 +}
 +
 +void WIN_UpdateWindowInputRegionPlacement(SDL_Window *window)
 +{
-+    RegionWindow *entry;
++    RegionWindow *entry = FindWindowByID(window->id);
 +    POINT origin;
 +    float scale_x, scale_y;
 +
-+    if (input_region.num_windows == 0) {
++    if (!entry) {
 +        return;
 +    }
 +
 +    GetPlacement(window, &origin, &scale_x, &scale_y);
 +
-+    SDL_LockMutex(input_region.lock);
-+    entry = FindWindowByID(window->id);
-+    if (entry) {
-+        entry->origin = origin;
-+        entry->scale_x = scale_x;
-+        entry->scale_y = scale_y;
-+    }
-+    SDL_UnlockMutex(input_region.lock);
++    WIN_LockMouseHook();
++    entry->origin = origin;
++    entry->scale_x = scale_x;
++    entry->scale_y = scale_y;
++    WIN_UnlockMouseHook();
 +}
 +
 +void WIN_RemoveWindowInputRegion(SDL_Window *window)
 +{
 +    int i;
 +
-+    if (input_region.num_windows == 0) {
-+        return;
-+    }
-+
-+    SDL_LockMutex(input_region.lock);
 +    for (i = 0; i < input_region.num_windows; ++i) {
 +        if (input_region.windows[i].window_id == window->id) {
-+            SDL_free(input_region.windows[i].rects);
-+            --input_region.num_windows;
-+            SDL_memmove(&input_region.windows[i], &input_region.windows[i + 1], (input_region.num_windows - i) * sizeof(*input_region.windows));
 +            break;
 +        }
 +    }
-+    SDL_UnlockMutex(input_region.lock);
-+
-+    if (input_region.num_windows == 0) {
-+        StopHook();
++    if (i == input_region.num_windows) {
++        return;
 +    }
++
++    WIN_LockMouseHook();
++    SDL_free(input_region.windows[i].rects);
++    --input_region.num_windows;
++    SDL_memmove(&input_region.windows[i], &input_region.windows[i + 1], (input_region.num_windows - i) * sizeof(*input_region.windows));
++    if (input_region.num_windows == 0) {
++        SDL_free(input_region.windows);
++        SDL_free(input_region.queue);
++        SDL_zero(input_region);
++    }
++    WIN_UnlockMouseHook();
++    WIN_ReleaseMouseHook();
 +}
 +
 +void WIN_PumpInputRegionEvents(SDL_VideoDevice *_this)
@@ -747,13 +582,13 @@ index 0000000000000000000000000000000000000000..416675b201617cc7aaf620035b210025
 +    }
 +
 +    // Report outside the lock, so the hook never waits for SDL.
-+    SDL_LockMutex(input_region.lock);
++    WIN_LockMouseHook();
 +    queue = input_region.queue;
 +    num_queued = input_region.num_queued;
 +    input_region.queue = NULL;
 +    input_region.num_queued = 0;
 +    input_region.queue_capacity = 0;
-+    SDL_UnlockMutex(input_region.lock);
++    WIN_UnlockMouseHook();
 +
 +    for (i = 0; i < num_queued; ++i) {
 +        const QueuedButton *button = &queue[i];
@@ -780,10 +615,10 @@ index 0000000000000000000000000000000000000000..416675b201617cc7aaf620035b210025
 +#endif // defined(SDL_VIDEO_DRIVER_WINDOWS) && !defined(SDL_PLATFORM_XBOXONE) && !defined(SDL_PLATFORM_XBOXSERIES)
 diff --git a/src/video/windows/SDL_windowsinputregion.h b/src/video/windows/SDL_windowsinputregion.h
 new file mode 100644
-index 0000000000000000000000000000000000000000..5c13b6827a1e3c061f9a6061b2d0bbbd8f45fbe1
+index 0000000000000000000000000000000000000000..976489adbd6391af9242b4ec739659f7d1f2ffa5
 --- /dev/null
 +++ b/src/video/windows/SDL_windowsinputregion.h
-@@ -0,0 +1,34 @@
+@@ -0,0 +1,36 @@
 +/*
 +  Simple DirectMedia Layer
 +  Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
@@ -810,6 +645,8 @@ index 0000000000000000000000000000000000000000..5c13b6827a1e3c061f9a6061b2d0bbbd
 +#define SDL_windowsinputregion_h_
 +
 +extern bool WIN_SetWindowInputRegion(SDL_VideoDevice *_this, SDL_Window *window, const SDL_Rect *rects, int count);
++// Called by the mouse hook, on its thread, with the mouse input of every window. pt is in physical screen coordinates. Returns whether to block it.
++extern bool WIN_HandleInputRegionHookInput(UINT message, POINT pt);
 +// Updates where the hook finds the window's region, when the window moves, resizes or changes its DPI.
 +extern void WIN_UpdateWindowInputRegionPlacement(SDL_Window *window);
 +// Takes the window off the hook, when it is destroyed.
@@ -818,6 +655,29 @@ index 0000000000000000000000000000000000000000..5c13b6827a1e3c061f9a6061b2d0bbbd
 +extern void WIN_PumpInputRegionEvents(SDL_VideoDevice *_this);
 +
 +#endif // SDL_windowsinputregion_h_
+diff --git a/src/video/windows/SDL_windowsmousehook.c b/src/video/windows/SDL_windowsmousehook.c
+index 91992dfc931d952e69f90af74aa4dd7579279020..6b3f07f0d858a9881a785d5b09ea60511903162a 100644
+--- a/src/video/windows/SDL_windowsmousehook.c
++++ b/src/video/windows/SDL_windowsmousehook.c
+@@ -23,6 +23,7 @@
+ #if defined(SDL_VIDEO_DRIVER_WINDOWS) && !defined(SDL_PLATFORM_XBOXONE) && !defined(SDL_PLATFORM_XBOXSERIES)
+ 
+ #include "SDL_windowsvideo.h"
++#include "SDL_windowsinputregion.h"
+ #include "SDL_windowsmousehook.h"
+ #include "SDL_windowsmousepassthrough.h"
+ 
+@@ -76,6 +77,10 @@ static LRESULT CALLBACK WIN_MouseHookProc(int nCode, WPARAM wParam, LPARAM lPara
+         // Touch and pens generate mouse input too, and the hook leaves it alone.
+         if (WIN_GetMouseMessageSource((ULONG)info->dwExtraInfo) == SDL_MOUSE_EVENT_SOURCE_MOUSE) {
+             const POINT pt = ClampToCursorArea(info->pt);
++            // A press the input region blocks goes to an SDL window, so it doesn't pass through.
++            if (WIN_HandleInputRegionHookInput((UINT)wParam, pt)) {
++                return 1;
++            }
+             WIN_HandleMousePassthroughHookInput((UINT)wParam, pt, HIWORD(info->mouseData));
+         }
+     }
 diff --git a/src/video/windows/SDL_windowsshape.c b/src/video/windows/SDL_windowsshape.c
 index 6bbfb58143b624ae51b85d5f1e79ed38f6ef29ab..dd9b4c473dd0bdb81790821868c07a3198bebd80 100644
 --- a/src/video/windows/SDL_windowsshape.c

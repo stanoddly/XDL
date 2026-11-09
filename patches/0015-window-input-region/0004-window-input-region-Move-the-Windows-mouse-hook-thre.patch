@@ -1,0 +1,734 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: botoddly <250804054+botoddly@users.noreply.github.com>
+Date: Mon, 9 Nov 2026 22:10:30 +0100
+Subject: [PATCH] window-input-region: Move the Windows mouse hook thread out
+ of mouse passthrough events so other features can share it
+
+---
+ VisualC-GDK/SDL/SDL.vcxproj                   |   2 +
+ VisualC-GDK/SDL/SDL.vcxproj.filters           |   2 +
+ VisualC/SDL/SDL.vcxproj                       |   2 +
+ VisualC/SDL/SDL.vcxproj.filters               |   6 +
+ src/video/windows/SDL_windowsmousehook.c      | 237 +++++++++++++++++
+ src/video/windows/SDL_windowsmousehook.h      |  38 +++
+ .../windows/SDL_windowsmousepassthrough.c     | 244 ++++--------------
+ .../windows/SDL_windowsmousepassthrough.h     |   2 +
+ 8 files changed, 342 insertions(+), 191 deletions(-)
+ create mode 100644 src/video/windows/SDL_windowsmousehook.c
+ create mode 100644 src/video/windows/SDL_windowsmousehook.h
+
+diff --git a/VisualC-GDK/SDL/SDL.vcxproj b/VisualC-GDK/SDL/SDL.vcxproj
+index 3ba75f81398f9ded4e2fb6f1f32779192b6bb380..e7f4b94479eb536e3146fb90a6f7cc2b562ab839 100644
+--- a/VisualC-GDK/SDL/SDL.vcxproj
++++ b/VisualC-GDK/SDL/SDL.vcxproj
+@@ -621,6 +621,7 @@
+     <ClInclude Include="..\..\src\video\windows\SDL_windowsmessagebox.h" />
+     <ClInclude Include="..\..\src\video\windows\SDL_windowsmodes.h" />
+     <ClInclude Include="..\..\src\video\windows\SDL_windowsmouse.h" />
++    <ClInclude Include="..\..\src\video\windows\SDL_windowsmousehook.h" />
+     <ClInclude Include="..\..\src\video\windows\SDL_windowsmousepassthrough.h" />
+     <ClInclude Include="..\..\src\video\windows\SDL_windowsopengl.h" />
+     <ClInclude Include="..\..\src\video\windows\SDL_windowsopengles.h" />
+@@ -910,6 +911,7 @@
+     <ClCompile Include="..\..\src\video\windows\SDL_windowsmessagebox.c" />
+     <ClCompile Include="..\..\src\video\windows\SDL_windowsmodes.c" />
+     <ClCompile Include="..\..\src\video\windows\SDL_windowsmouse.c" />
++    <ClCompile Include="..\..\src\video\windows\SDL_windowsmousehook.c" />
+     <ClCompile Include="..\..\src\video\windows\SDL_windowsmousepassthrough.c" />
+     <ClCompile Include="..\..\src\video\windows\SDL_windowsopengl.c" />
+     <ClCompile Include="..\..\src\video\windows\SDL_windowsopengles.c" />
+diff --git a/VisualC-GDK/SDL/SDL.vcxproj.filters b/VisualC-GDK/SDL/SDL.vcxproj.filters
+index ad9e3c30114352383a738fd8c6a9dd028878cc47..29a0d2efef659fc51cd75bfd733c711e8070405c 100644
+--- a/VisualC-GDK/SDL/SDL.vcxproj.filters
++++ b/VisualC-GDK/SDL/SDL.vcxproj.filters
+@@ -203,6 +203,7 @@
+     <ClCompile Include="..\..\src\video\windows\SDL_windowsmessagebox.c" />
+     <ClCompile Include="..\..\src\video\windows\SDL_windowsmodes.c" />
+     <ClCompile Include="..\..\src\video\windows\SDL_windowsmouse.c" />
++    <ClCompile Include="..\..\src\video\windows\SDL_windowsmousehook.c" />
+     <ClCompile Include="..\..\src\video\windows\SDL_windowsmousepassthrough.c" />
+     <ClCompile Include="..\..\src\video\windows\SDL_windowsopengl.c" />
+     <ClCompile Include="..\..\src\video\windows\SDL_windowsopengles.c" />
+@@ -480,6 +481,7 @@
+     <ClInclude Include="..\..\src\video\windows\SDL_windowsmessagebox.h" />
+     <ClInclude Include="..\..\src\video\windows\SDL_windowsmodes.h" />
+     <ClInclude Include="..\..\src\video\windows\SDL_windowsmouse.h" />
++    <ClInclude Include="..\..\src\video\windows\SDL_windowsmousehook.h" />
+     <ClInclude Include="..\..\src\video\windows\SDL_windowsmousepassthrough.h" />
+     <ClInclude Include="..\..\src\video\windows\SDL_windowsopengl.h" />
+     <ClInclude Include="..\..\src\video\windows\SDL_windowsopengles.h" />
+diff --git a/VisualC/SDL/SDL.vcxproj b/VisualC/SDL/SDL.vcxproj
+index 3053fdfe0ec3ed0e2989000072720410d70a5cec..11471d38ba45c5ac7fd48a6474952add9d595421 100644
+--- a/VisualC/SDL/SDL.vcxproj
++++ b/VisualC/SDL/SDL.vcxproj
+@@ -530,6 +530,7 @@
+     <ClInclude Include="..\..\src\video\windows\SDL_windowsmessagebox.h" />
+     <ClInclude Include="..\..\src\video\windows\SDL_windowsmodes.h" />
+     <ClInclude Include="..\..\src\video\windows\SDL_windowsmouse.h" />
++    <ClInclude Include="..\..\src\video\windows\SDL_windowsmousehook.h" />
+     <ClInclude Include="..\..\src\video\windows\SDL_windowsmousepassthrough.h" />
+     <ClInclude Include="..\..\src\video\windows\SDL_windowsopengl.h" />
+     <ClInclude Include="..\..\src\video\windows\SDL_windowsopengles.h" />
+@@ -771,6 +772,7 @@
+     <ClCompile Include="..\..\src\video\windows\SDL_windowsmessagebox.c" />
+     <ClCompile Include="..\..\src\video\windows\SDL_windowsmodes.c" />
+     <ClCompile Include="..\..\src\video\windows\SDL_windowsmouse.c" />
++    <ClCompile Include="..\..\src\video\windows\SDL_windowsmousehook.c" />
+     <ClCompile Include="..\..\src\video\windows\SDL_windowsmousepassthrough.c" />
+     <ClCompile Include="..\..\src\video\windows\SDL_windowsopengl.c" />
+     <ClCompile Include="..\..\src\video\windows\SDL_windowsopengles.c" />
+diff --git a/VisualC/SDL/SDL.vcxproj.filters b/VisualC/SDL/SDL.vcxproj.filters
+index 8e0e8a95ecb8238cdad66d67f840ccc0b0a2cadd..f54a549f4cf7275774155f5140549a13167d93d8 100644
+--- a/VisualC/SDL/SDL.vcxproj.filters
++++ b/VisualC/SDL/SDL.vcxproj.filters
+@@ -786,6 +786,9 @@
+     <ClInclude Include="..\..\src\video\windows\SDL_windowsmouse.h">
+       <Filter>video\windows</Filter>
+     </ClInclude>
++    <ClInclude Include="..\..\src\video\windows\SDL_windowsmousehook.h">
++      <Filter>video\windows</Filter>
++    </ClInclude>
+     <ClInclude Include="..\..\src\video\windows\SDL_windowsmousepassthrough.h">
+       <Filter>video\windows</Filter>
+     </ClInclude>
+@@ -1446,6 +1449,9 @@
+     <ClCompile Include="..\..\src\video\windows\SDL_windowsmouse.c">
+       <Filter>video\windows</Filter>
+     </ClCompile>
++    <ClCompile Include="..\..\src\video\windows\SDL_windowsmousehook.c">
++      <Filter>video\windows</Filter>
++    </ClCompile>
+     <ClCompile Include="..\..\src\video\windows\SDL_windowsmousepassthrough.c">
+       <Filter>video\windows</Filter>
+     </ClCompile>
+diff --git a/src/video/windows/SDL_windowsmousehook.c b/src/video/windows/SDL_windowsmousehook.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..91992dfc931d952e69f90af74aa4dd7579279020
+--- /dev/null
++++ b/src/video/windows/SDL_windowsmousehook.c
+@@ -0,0 +1,237 @@
++/*
++  Simple DirectMedia Layer
++  Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
++
++  This software is provided 'as-is', without any express or implied
++  warranty.  In no event will the authors be held liable for any damages
++  arising from the use of this software.
++
++  Permission is granted to anyone to use this software for any purpose,
++  including commercial applications, and to alter it and redistribute it
++  freely, subject to the following restrictions:
++
++  1. The origin of this software must not be misrepresented; you must not
++     claim that you wrote the original software. If you use this software
++     in a product, an acknowledgment in the product documentation would be
++     appreciated but is not required.
++  2. Altered source versions must be plainly marked as such, and must not be
++     misrepresented as being the original software.
++  3. This notice may not be removed or altered from any source distribution.
++*/
++#include "SDL_internal.h"
++
++#if defined(SDL_VIDEO_DRIVER_WINDOWS) && !defined(SDL_PLATFORM_XBOXONE) && !defined(SDL_PLATFORM_XBOXSERIES)
++
++#include "SDL_windowsvideo.h"
++#include "SDL_windowsmousehook.h"
++#include "SDL_windowsmousepassthrough.h"
++
++/* A low-level mouse hook sees the mouse input that goes to every window. Windows holds each mouse event, for the whole system, until the hook
++   returns. So the hook runs on its own thread with its own message loop, and the features that need it share one. Each decides, as the input
++   happens, what to do with it, and queues what the event pump reports on the main thread. */
++
++static struct
++{
++    int num_users;
++    // The last user is releasing the hook. Waiting for the thread handles sent messages, which can run SDL and application code.
++    bool stopping;
++    SDL_Mutex *lock;
++    // The thread with the SDL windows, which reports the input. It is woken with a thread message, because a window can be recreated.
++    DWORD main_thread_id;
++    HANDLE thread;
++    HANDLE ready_event;
++    HANDLE stop_event;
++    HHOOK hook;
++    DWORD hook_error;
++    UINT wake_message;
++    // The hook reports physical coordinates, so its thread is per-monitor DPI aware for hit testing, whatever the process is.
++    DPI_AWARENESS_CONTEXT (WINAPI *SetThreadDpiAwarenessContext)(DPI_AWARENESS_CONTEXT);
++} mouse_hook;
++
++// The hook reports the requested position, which can lie past a screen edge or the cursor clip rectangle; the cursor itself stays inside both.
++static POINT ClampToCursorArea(POINT pt)
++{
++    HMONITOR monitor = MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
++    MONITORINFO info;
++    RECT clip;
++
++    SDL_zero(info);
++    info.cbSize = sizeof(info);
++    if (monitor && GetMonitorInfo(monitor, &info)) {
++        pt.x = SDL_clamp(pt.x, info.rcMonitor.left, info.rcMonitor.right - 1);
++        pt.y = SDL_clamp(pt.y, info.rcMonitor.top, info.rcMonitor.bottom - 1);
++    }
++    if (GetClipCursor(&clip)) {
++        pt.x = SDL_clamp(pt.x, clip.left, clip.right - 1);
++        pt.y = SDL_clamp(pt.y, clip.top, clip.bottom - 1);
++    }
++    return pt;
++}
++
++static LRESULT CALLBACK WIN_MouseHookProc(int nCode, WPARAM wParam, LPARAM lParam)
++{
++    if (nCode == HC_ACTION) {
++        const MSLLHOOKSTRUCT *info = (const MSLLHOOKSTRUCT *)lParam;
++
++        // Touch and pens generate mouse input too, and the hook leaves it alone.
++        if (WIN_GetMouseMessageSource((ULONG)info->dwExtraInfo) == SDL_MOUSE_EVENT_SOURCE_MOUSE) {
++            const POINT pt = ClampToCursorArea(info->pt);
++            WIN_HandleMousePassthroughHookInput((UINT)wParam, pt, HIWORD(info->mouseData));
++        }
++    }
++    return CallNextHookEx(NULL, nCode, wParam, lParam);
++}
++
++static DWORD WINAPI WIN_MouseHookThread(LPVOID param)
++{
++    HMODULE module;
++    MSG msg;
++
++    // Windows silently removes a low-level hook that does not return in time.
++    SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL);
++    if (mouse_hook.SetThreadDpiAwarenessContext) {
++        mouse_hook.SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
++    }
++
++    // SetWindowsHookEx() needs the module with the hook, and SDL can be linked statically or dynamically.
++    if (GetModuleHandleEx(GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT | GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, (LPTSTR)WIN_MouseHookProc, &module)) {
++        mouse_hook.hook = SetWindowsHookEx(WH_MOUSE_LL, WIN_MouseHookProc, module, 0);
++    }
++    mouse_hook.hook_error = mouse_hook.hook ? 0 : GetLastError();
++    SetEvent(mouse_hook.ready_event);
++    if (!mouse_hook.hook) {
++        return 0;
++    }
++
++    // Windows calls the hook while this thread retrieves messages.
++    for (;;) {
++        const DWORD result = MsgWaitForMultipleObjects(1, &mouse_hook.stop_event, FALSE, INFINITE, QS_ALLINPUT);
++        if (result != WAIT_OBJECT_0 + 1) {
++            break;
++        }
++        while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
++        }
++    }
++
++    UnhookWindowsHookEx(mouse_hook.hook);
++    mouse_hook.hook = NULL;
++    return 0;
++}
++
++static void StopThread(void)
++{
++    if (mouse_hook.thread) {
++        HANDLE thread = mouse_hook.thread;
++        SetEvent(mouse_hook.stop_event);
++        // Handle messages sent to this thread while waiting, so a hook call that sent one can finish.
++        while (MsgWaitForMultipleObjects(1, &thread, FALSE, INFINITE, QS_SENDMESSAGE) == WAIT_OBJECT_0 + 1) {
++            MSG msg;
++            PeekMessage(&msg, NULL, 0, 0, PM_NOREMOVE | PM_QS_SENDMESSAGE);
++        }
++        CloseHandle(thread);
++        mouse_hook.thread = NULL;
++    }
++    if (mouse_hook.ready_event) {
++        CloseHandle(mouse_hook.ready_event);
++        mouse_hook.ready_event = NULL;
++    }
++    if (mouse_hook.stop_event) {
++        CloseHandle(mouse_hook.stop_event);
++        mouse_hook.stop_event = NULL;
++    }
++    mouse_hook.hook = NULL;
++}
++
++static bool StartThread(SDL_VideoDevice *_this)
++{
++    mouse_hook.SetThreadDpiAwarenessContext = _this->internal->SetThreadDpiAwarenessContext;
++    mouse_hook.ready_event = CreateEvent(NULL, FALSE, FALSE, NULL);
++    mouse_hook.stop_event = CreateEvent(NULL, TRUE, FALSE, NULL);
++    if (!mouse_hook.ready_event || !mouse_hook.stop_event) {
++        WIN_SetError("CreateEvent()");
++        StopThread();
++        return false;
++    }
++
++    mouse_hook.thread = CreateThread(NULL, 0, WIN_MouseHookThread, NULL, 0, NULL);
++    if (!mouse_hook.thread) {
++        WIN_SetError("CreateThread()");
++        StopThread();
++        return false;
++    }
++
++    WaitForSingleObject(mouse_hook.ready_event, INFINITE);
++    if (!mouse_hook.hook) {
++        // The thread exits on its own when the hook fails.
++        const DWORD error = mouse_hook.hook_error;
++        StopThread();
++        SetLastError(error);
++        return WIN_SetError("SetWindowsHookEx()");
++    }
++    return true;
++}
++
++// Frees everything once the hook has no user and the thread is stopped.
++static void Cleanup(void)
++{
++    SDL_DestroyMutex(mouse_hook.lock);
++    SDL_zero(mouse_hook);
++}
++
++bool WIN_AcquireMouseHook(SDL_VideoDevice *_this)
++{
++    // Only the last user runs code during the stop, and it doesn't come back.
++    if (mouse_hook.stopping) {
++        return SDL_SetError("The mouse hook is stopping");
++    }
++
++    if (mouse_hook.num_users == 0) {
++        mouse_hook.lock = SDL_CreateMutex();
++        if (!mouse_hook.lock) {
++            return false;
++        }
++        mouse_hook.wake_message = RegisterWindowMessage(TEXT("SDL_MouseHookWake"));
++        mouse_hook.main_thread_id = GetCurrentThreadId();
++        if (!StartThread(_this)) {
++            Cleanup();
++            return false;
++        }
++    }
++    ++mouse_hook.num_users;
++    return true;
++}
++
++void WIN_ReleaseMouseHook(void)
++{
++    if (--mouse_hook.num_users > 0) {
++        return;
++    }
++
++    // The hook takes the lock, so nothing here holds it while waiting for the thread.
++    mouse_hook.stopping = true;
++    StopThread();
++    Cleanup();
++}
++
++void WIN_LockMouseHook(void)
++{
++    SDL_LockMutex(mouse_hook.lock);
++}
++
++void WIN_UnlockMouseHook(void)
++{
++    SDL_UnlockMutex(mouse_hook.lock);
++}
++
++DWORD WIN_GetMouseHookMainThreadID(void)
++{
++    return mouse_hook.main_thread_id;
++}
++
++void WIN_WakeForMouseHookInput(void)
++{
++    // PostThreadMessage() does not wait.
++    PostThreadMessage(mouse_hook.main_thread_id, mouse_hook.wake_message, 0, 0);
++}
++
++#endif // defined(SDL_VIDEO_DRIVER_WINDOWS) && !defined(SDL_PLATFORM_XBOXONE) && !defined(SDL_PLATFORM_XBOXSERIES)
+diff --git a/src/video/windows/SDL_windowsmousehook.h b/src/video/windows/SDL_windowsmousehook.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..237ceb3a3495a8ee717a5e8bff9869f0b6e29344
+--- /dev/null
++++ b/src/video/windows/SDL_windowsmousehook.h
+@@ -0,0 +1,38 @@
++/*
++  Simple DirectMedia Layer
++  Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
++
++  This software is provided 'as-is', without any express or implied
++  warranty.  In no event will the authors be held liable for any damages
++  arising from the use of this software.
++
++  Permission is granted to anyone to use this software for any purpose,
++  including commercial applications, and to alter it and redistribute it
++  freely, subject to the following restrictions:
++
++  1. The origin of this software must not be misrepresented; you must not
++     claim that you wrote the original software. If you use this software
++     in a product, an acknowledgment in the product documentation would be
++     appreciated but is not required.
++  2. Altered source versions must be plainly marked as such, and must not be
++     misrepresented as being the original software.
++  3. This notice may not be removed or altered from any source distribution.
++*/
++#include "SDL_internal.h"
++
++#ifndef SDL_windowsmousehook_h_
++#define SDL_windowsmousehook_h_
++
++// Starts the low-level mouse hook for one more user. Fails if the hook can't be installed or is stopping.
++extern bool WIN_AcquireMouseHook(SDL_VideoDevice *_this);
++// Stops the hook after its last user. Waiting for the hook's thread handles messages sent to this thread, which can run SDL and application code.
++extern void WIN_ReleaseMouseHook(void);
++// Guards the state the hook's thread shares with the main thread. Only while the hook has a user.
++extern void WIN_LockMouseHook(void);
++extern void WIN_UnlockMouseHook(void);
++// The thread with the SDL windows, which reports the input the hook queues.
++extern DWORD WIN_GetMouseHookMainThreadID(void);
++// Wakes the event loop, so SDL_WaitEvent() returns and the input the hook queued is reported.
++extern void WIN_WakeForMouseHookInput(void);
++
++#endif // SDL_windowsmousehook_h_
+diff --git a/src/video/windows/SDL_windowsmousepassthrough.c b/src/video/windows/SDL_windowsmousepassthrough.c
+index 10e589f13e95dd79bdc01cdf3b20d2cce44df813..5794d3dd8efd14b952a39f781dc618156fa7daea 100644
+--- a/src/video/windows/SDL_windowsmousepassthrough.c
++++ b/src/video/windows/SDL_windowsmousepassthrough.c
+@@ -23,12 +23,12 @@
+ #if defined(SDL_VIDEO_DRIVER_WINDOWS) && !defined(SDL_PLATFORM_XBOXONE) && !defined(SDL_PLATFORM_XBOXSERIES)
+ 
+ #include "SDL_windowsvideo.h"
++#include "SDL_windowsmousehook.h"
+ #include "SDL_windowsmousepassthrough.h"
+ #include "../../events/SDL_mouse_c.h"
+ 
+-/* A low-level mouse hook sees the mouse input that goes to every window. Windows holds each mouse event, for the whole system, until the hook
+-   returns. So the hook runs on its own thread with its own message loop. It decides, as the input happens, whether an SDL window receives the
+-   input itself, and queues the rest; it holds the lock only to queue. The event pump reports the queued input on the main thread. */
++/* The mouse hook decides, as the input happens, whether an SDL window receives the input itself, and queues the rest; it holds the lock only
++   to check whether a window has these events and to queue. The event pump reports the queued input on the main thread. */
+ 
+ typedef struct
+ {
+@@ -40,27 +40,13 @@ typedef struct
+ // Plenty for the input between two pumps, as motion is merged. Beyond it, input is dropped rather than growing without bound.
+ #define MAX_QUEUED_INPUT 4096
+ 
++// Guarded by the mouse hook's lock. Only the main thread changes num_windows, so it reads it without the lock.
+ static struct
+ {
+-    // Guards queue, num_queued and queue_capacity, which the hook thread reads and writes.
+-    SDL_Mutex *lock;
+     PassthroughInput *queue;
+     int num_queued;
+     int queue_capacity;
+-
+     int num_windows;
+-    // The last window is being disabled. Waiting for the thread handles sent messages, which can run SDL and application code.
+-    bool stopping;
+-    // The thread with the SDL windows, which reports the input. It is woken with a thread message, because a window can be recreated.
+-    DWORD main_thread_id;
+-    HANDLE thread;
+-    HANDLE ready_event;
+-    HANDLE stop_event;
+-    HHOOK hook;
+-    DWORD hook_error;
+-    UINT wake_message;
+-    // The hook reports physical coordinates, so its thread is per-monitor DPI aware for hit testing, whatever the process is.
+-    DPI_AWARENESS_CONTEXT (WINAPI *SetThreadDpiAwarenessContext)(DPI_AWARENESS_CONTEXT);
+ } passthrough;
+ 
+ static HWND GetThreadCapture(DWORD thread_id)
+@@ -79,26 +65,6 @@ static bool IsOwnWindow(HWND hwnd)
+     return process_id == GetCurrentProcessId();
+ }
+ 
+-// The hook reports the requested position, which can lie past a screen edge or the cursor clip rectangle; the cursor itself stays inside both.
+-static POINT ClampToCursorArea(POINT pt)
+-{
+-    HMONITOR monitor = MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
+-    MONITORINFO info;
+-    RECT clip;
+-
+-    SDL_zero(info);
+-    info.cbSize = sizeof(info);
+-    if (monitor && GetMonitorInfo(monitor, &info)) {
+-        pt.x = SDL_clamp(pt.x, info.rcMonitor.left, info.rcMonitor.right - 1);
+-        pt.y = SDL_clamp(pt.y, info.rcMonitor.top, info.rcMonitor.bottom - 1);
+-    }
+-    if (GetClipCursor(&clip)) {
+-        pt.x = SDL_clamp(pt.x, clip.left, clip.right - 1);
+-        pt.y = SDL_clamp(pt.y, clip.top, clip.bottom - 1);
+-    }
+-    return pt;
+-}
+-
+ // Whether an SDL window receives the input at pt itself, decided as the input happens. pt is in physical screen coordinates.
+ static bool IsNativeInput(POINT pt)
+ {
+@@ -108,7 +74,7 @@ static bool IsNativeInput(POINT pt)
+ 
+     // A capture routes the input to the capturing window wherever the pointer is. SDL captures for any of its windows, also ones that are not
+     // in the foreground; another application's capture is on the foreground thread.
+-    if (GetThreadCapture(passthrough.main_thread_id)) {
++    if (GetThreadCapture(WIN_GetMouseHookMainThreadID())) {
+         return true;
+     }
+     foreground = GetForegroundWindow();
+@@ -155,147 +121,47 @@ static void QueueInput(UINT message, POINT pt, WORD xbutton)
+     input->pt = pt;
+     input->xbutton = xbutton;
+ 
+-    // Wake the event loop once per batch, so SDL_WaitEvent() returns. PostThreadMessage() does not wait.
++    // Wake the event loop once per batch.
+     if (passthrough.num_queued == 1) {
+-        PostThreadMessage(passthrough.main_thread_id, passthrough.wake_message, 0, 0);
++        WIN_WakeForMouseHookInput();
+     }
+ }
+ 
+-static LRESULT CALLBACK WIN_MousePassthroughHookProc(int nCode, WPARAM wParam, LPARAM lParam)
++void WIN_HandleMousePassthroughHookInput(UINT message, POINT pt, WORD xbutton)
+ {
+-    if (nCode == HC_ACTION) {
+-        const MSLLHOOKSTRUCT *info = (const MSLLHOOKSTRUCT *)lParam;
+-        const UINT message = (UINT)wParam;
+-        bool release = false;
+-        bool handled = true;
+-
+-        switch (message) {
+-        case WM_MOUSEMOVE:
+-        case WM_LBUTTONDOWN:
+-        case WM_RBUTTONDOWN:
+-        case WM_MBUTTONDOWN:
+-        case WM_XBUTTONDOWN:
+-            break;
+-        case WM_LBUTTONUP:
+-        case WM_RBUTTONUP:
+-        case WM_MBUTTONUP:
+-        case WM_XBUTTONUP:
+-            release = true;
+-            break;
+-        default:
+-            handled = false;
+-            break;
+-        }
++    bool release = false;
++    bool active;
+ 
+-        // Touch and pens generate mouse input too. A release is queued even when it is native: it is reported only if its press was, and the
+-        // native one is then ignored.
+-        if (handled && WIN_GetMouseMessageSource((ULONG)info->dwExtraInfo) == SDL_MOUSE_EVENT_SOURCE_MOUSE) {
+-            const POINT pt = ClampToCursorArea(info->pt);
+-            if (release || !IsNativeInput(pt)) {
+-                SDL_LockMutex(passthrough.lock);
+-                QueueInput(message, pt, HIWORD(info->mouseData));
+-                SDL_UnlockMutex(passthrough.lock);
+-            }
+-        }
+-    }
+-    return CallNextHookEx(NULL, nCode, wParam, lParam);
+-}
+-
+-static DWORD WINAPI WIN_MousePassthroughThread(LPVOID param)
+-{
+-    HMODULE module;
+-    MSG msg;
+-
+-    // Windows silently removes a low-level hook that does not return in time.
+-    SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL);
+-    if (passthrough.SetThreadDpiAwarenessContext) {
+-        passthrough.SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+-    }
+-
+-    // SetWindowsHookEx() needs the module with the hook, and SDL can be linked statically or dynamically.
+-    if (GetModuleHandleEx(GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT | GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, (LPTSTR)WIN_MousePassthroughHookProc, &module)) {
+-        passthrough.hook = SetWindowsHookEx(WH_MOUSE_LL, WIN_MousePassthroughHookProc, module, 0);
+-    }
+-    passthrough.hook_error = passthrough.hook ? 0 : GetLastError();
+-    SetEvent(passthrough.ready_event);
+-    if (!passthrough.hook) {
+-        return 0;
+-    }
+-
+-    // Windows calls the hook while this thread retrieves messages.
+-    for (;;) {
+-        const DWORD result = MsgWaitForMultipleObjects(1, &passthrough.stop_event, FALSE, INFINITE, QS_ALLINPUT);
+-        if (result != WAIT_OBJECT_0 + 1) {
+-            break;
+-        }
+-        while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
+-        }
++    switch (message) {
++    case WM_MOUSEMOVE:
++    case WM_LBUTTONDOWN:
++    case WM_RBUTTONDOWN:
++    case WM_MBUTTONDOWN:
++    case WM_XBUTTONDOWN:
++        break;
++    case WM_LBUTTONUP:
++    case WM_RBUTTONUP:
++    case WM_MBUTTONUP:
++    case WM_XBUTTONUP:
++        release = true;
++        break;
++    default:
++        return;
+     }
+ 
+-    UnhookWindowsHookEx(passthrough.hook);
+-    passthrough.hook = NULL;
+-    return 0;
+-}
++    // The hook can serve other features while no window has mouse passthrough events.
++    WIN_LockMouseHook();
++    active = passthrough.num_windows > 0;
++    WIN_UnlockMouseHook();
+ 
+-static void StopThread(void)
+-{
+-    if (passthrough.thread) {
+-        HANDLE thread = passthrough.thread;
+-        SetEvent(passthrough.stop_event);
+-        // Handle messages sent to this thread while waiting, so a hook call that sent one can finish.
+-        while (MsgWaitForMultipleObjects(1, &thread, FALSE, INFINITE, QS_SENDMESSAGE) == WAIT_OBJECT_0 + 1) {
+-            MSG msg;
+-            PeekMessage(&msg, NULL, 0, 0, PM_NOREMOVE | PM_QS_SENDMESSAGE);
++    // A release is queued even when it is native: it is reported only if its press was, and the native one is then ignored.
++    if (active && (release || !IsNativeInput(pt))) {
++        WIN_LockMouseHook();
++        if (passthrough.num_windows > 0) {
++            QueueInput(message, pt, xbutton);
+         }
+-        CloseHandle(thread);
+-        passthrough.thread = NULL;
+-    }
+-    if (passthrough.ready_event) {
+-        CloseHandle(passthrough.ready_event);
+-        passthrough.ready_event = NULL;
++        WIN_UnlockMouseHook();
+     }
+-    if (passthrough.stop_event) {
+-        CloseHandle(passthrough.stop_event);
+-        passthrough.stop_event = NULL;
+-    }
+-    passthrough.hook = NULL;
+-}
+-
+-static bool StartThread(SDL_VideoDevice *_this)
+-{
+-    passthrough.SetThreadDpiAwarenessContext = _this->internal->SetThreadDpiAwarenessContext;
+-    passthrough.ready_event = CreateEvent(NULL, FALSE, FALSE, NULL);
+-    passthrough.stop_event = CreateEvent(NULL, TRUE, FALSE, NULL);
+-    if (!passthrough.ready_event || !passthrough.stop_event) {
+-        WIN_SetError("CreateEvent()");
+-        StopThread();
+-        return false;
+-    }
+-
+-    passthrough.thread = CreateThread(NULL, 0, WIN_MousePassthroughThread, NULL, 0, NULL);
+-    if (!passthrough.thread) {
+-        WIN_SetError("CreateThread()");
+-        StopThread();
+-        return false;
+-    }
+-
+-    WaitForSingleObject(passthrough.ready_event, INFINITE);
+-    if (!passthrough.hook) {
+-        // The thread exits on its own when the hook fails.
+-        const DWORD error = passthrough.hook_error;
+-        StopThread();
+-        SetLastError(error);
+-        return WIN_SetError("SetWindowsHookEx()");
+-    }
+-    return true;
+-}
+-
+-// Frees everything once no window has mouse passthrough events and the thread is stopped.
+-static void Cleanup(void)
+-{
+-    SDL_free(passthrough.queue);
+-    SDL_DestroyMutex(passthrough.lock);
+-    SDL_zero(passthrough);
+ }
+ 
+ // Whether the pointer is over the window's own input, so it has the mouse focus natively.
+@@ -314,35 +180,31 @@ static bool IsPointerOverOwnInput(SDL_Window *window)
+ 
+ bool WIN_SetWindowMousePassthroughEvents(SDL_VideoDevice *_this, SDL_Window *window, bool enabled)
+ {
+-    // Only the window being disabled can disable during the stop, as it was the last one.
+-    if (passthrough.stopping) {
+-        return enabled ? SDL_SetError("Mouse passthrough events are stopping") : true;
+-    }
+-
+     if (enabled) {
+-        if (passthrough.num_windows == 0) {
+-            passthrough.lock = SDL_CreateMutex();
+-            if (!passthrough.lock) {
+-                return false;
+-            }
+-            passthrough.wake_message = RegisterWindowMessage(TEXT("SDL_MousePassthroughWake"));
+-            passthrough.main_thread_id = GetCurrentThreadId();
+-            if (!StartThread(_this)) {
+-                Cleanup();
+-                return false;
+-            }
++        if (!WIN_AcquireMouseHook(_this)) {
++            return false;
+         }
++        WIN_LockMouseHook();
+         ++passthrough.num_windows;
++        WIN_UnlockMouseHook();
++        return true;
++    }
++
++    // Only the window being disabled can disable again while the hook stops, as it was the last one.
++    if (passthrough.num_windows == 0) {
+         return true;
+     }
+ 
++    WIN_LockMouseHook();
+     --passthrough.num_windows;
+     if (passthrough.num_windows == 0) {
+-        // The hook takes the lock, so nothing here holds it while waiting for the thread.
+-        passthrough.stopping = true;
+-        StopThread();
+-        Cleanup();
++        SDL_free(passthrough.queue);
++        passthrough.queue = NULL;
++        passthrough.num_queued = 0;
++        passthrough.queue_capacity = 0;
+     }
++    WIN_UnlockMouseHook();
++    WIN_ReleaseMouseHook();
+ 
+     // The window keeps a focus it received natively.
+     if (SDL_GetMouseFocus() == window && !IsPointerOverOwnInput(window)) {
+@@ -410,13 +272,13 @@ void WIN_PumpMousePassthroughEvents(SDL_VideoDevice *_this)
+     }
+ 
+     // Report outside the lock, so the hook never waits for SDL.
+-    SDL_LockMutex(passthrough.lock);
++    WIN_LockMouseHook();
+     queue = passthrough.queue;
+     num_queued = passthrough.num_queued;
+     passthrough.queue = NULL;
+     passthrough.num_queued = 0;
+     passthrough.queue_capacity = 0;
+-    SDL_UnlockMutex(passthrough.lock);
++    WIN_UnlockMouseHook();
+ 
+     for (i = 0; i < num_queued; ++i) {
+         PassthroughInput *input = &queue[i];
+diff --git a/src/video/windows/SDL_windowsmousepassthrough.h b/src/video/windows/SDL_windowsmousepassthrough.h
+index 1d942a0485bdbfba4e869581169449809a1ab740..436bb0fe9f2e49365335edc8ad57ea4245fb57f5 100644
+--- a/src/video/windows/SDL_windowsmousepassthrough.h
++++ b/src/video/windows/SDL_windowsmousepassthrough.h
+@@ -24,6 +24,8 @@
+ #define SDL_windowsmousepassthrough_h_
+ 
+ extern bool WIN_SetWindowMousePassthroughEvents(SDL_VideoDevice *_this, SDL_Window *window, bool enabled);
++// Called by the mouse hook, on its thread, with the mouse input of every window. pt is in physical screen coordinates.
++extern void WIN_HandleMousePassthroughHookInput(UINT message, POINT pt, WORD xbutton);
+ // Reports the mouse input that passed through windows since the last call.
+ extern void WIN_PumpMousePassthroughEvents(SDL_VideoDevice *_this);
+ 

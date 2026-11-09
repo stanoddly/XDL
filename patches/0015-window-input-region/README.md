@@ -6,7 +6,7 @@ For example, a transparent window over the whole display passes the rectangles o
 
 - **Wayland:** the rectangles become the surface's input region, scaled to surface coordinates as in `0004-window-shape-passthrough`. The region takes effect with the next present.
 - **X11:** `XShapeCombineRectangles` with `ShapeInput`. It fails without the SHAPE extension.
-- **Windows:** Windows has no input region that leaves drawing alone. So the window becomes input-transparent, and a low-level mouse hook blocks a left press inside the region and its release, and reports both to the window. A press goes through when a window above covers that point.
+- **Windows:** Windows has no input region that leaves drawing alone. So the window becomes input-transparent, and a low-level mouse hook blocks a left press inside the region and its release, and reports both to the window. A press goes through when a window above covers that point. The hook and its thread move out of mouse passthrough events into their own file, and both features share them.
 - **macOS:** Cocoa has no input region either. `ignoresMouseEvents` follows whether the cursor is inside a rectangle, on each call and on the window's own mouse motion.
 
 Mouse passthrough events report input that goes to other windows. That is a different use case, so a window can't have both. `XDL_SetWindowInputRegion` fails while the window has them enabled, and enabling them fails once the window has a region.
@@ -16,12 +16,11 @@ The code comes from botoddly/SDL#4, which replaced mouse passthrough events with
 ## Depends on
 
 - `0004-window-shape-passthrough`: the Windows step makes the window input-transparent with its shape code.
-- `0006-mouse-passthrough-events`: the region shares its tracking of forwarded buttons and its dynamic API slot order.
+- `0006-mouse-passthrough-events`: the region shares its tracking of forwarded buttons, its Windows mouse hook thread and its dynamic API slot order.
 
 ## Known gaps
 
-- Windows and macOS are only compiled, by CI. Only Wayland and X11 were run.
-- On Windows, the region has its own mouse hook thread. When another window in the process has mouse passthrough events, there are two hooks.
+- Only Wayland and X11 were run. Windows was compiled with `zig cc`, and macOS only by CI.
 - Windows silently removes a low-level mouse hook that keeps missing its timeout. The region then stops taking input, and the app is not told.
 
 ## Testing
