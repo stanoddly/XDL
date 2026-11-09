@@ -42,6 +42,18 @@ for library in XDL3 "${satellites[@]}"; do
   copies+=("$out_dir/$published")
 done
 
+# emdawnwebgpu is no DllImport module, but it keeps the same naming. Its JavaScript libraries go beside it, because an app links them too.
+if [[ "$rid" == browser-* ]]; then
+  [[ -f "$install_prefix/lib/libemdawnwebgpu.a" ]] || die "$install_prefix/lib/libemdawnwebgpu.a does not exist."
+  cp "$install_prefix/lib/libemdawnwebgpu.a" "$out_dir/emdawnwebgpu.a"
+  copies+=("$out_dir/emdawnwebgpu.a")
+  for library in library_webgpu_enum_tables.js library_webgpu_generated_struct_info.js library_webgpu_generated_sig_info.js library_webgpu.js; do
+    [[ -f "$install_prefix/share/emdawnwebgpu/$library" ]] || die "$install_prefix/share/emdawnwebgpu/$library does not exist."
+    cp "$install_prefix/share/emdawnwebgpu/$library" "$out_dir/"
+    copies+=("$out_dir/$library")
+  done
+fi
+
 # check-dependencies.sh fails a satellite that still needs the versioned name, because these tools skip a name they do not find.
 case "$rid" in
   linux-*)

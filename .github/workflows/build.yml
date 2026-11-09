@@ -124,11 +124,10 @@ jobs:
       - name: Collect the runtime
         run: tools/collect-runtime.sh browser-wasm build/install runtimes/browser-wasm/native
 
-      # In a shell without emsdk-env.sh, with a cache of its own: a .NET link into the cache that emsdk-env.sh uses emptied it once.
+      # In a shell without emsdk-env.sh, so the link uses the workload's read-only Emscripten cache, as an app's link does.
       - name: Link the archives into a .NET browser app
         run: |
-          dotnet publish tests/browser-dotnet -c Release -o build/dotnet-link "-p:XdlArchiveDirectory=$PWD/runtimes/browser-wasm/native" \
-            "-p:WasmCachePath=$PWD/build/dotnet-em-cache"
+          dotnet publish tests/browser-dotnet -c Release -o build/dotnet-link "-p:XdlArchiveDirectory=$PWD/runtimes/browser-wasm/native"
           node tests/browser-dotnet/run.mjs build/dotnet-link/wwwroot
 
       - name: Upload
