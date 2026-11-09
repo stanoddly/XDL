@@ -1,0 +1,299 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: botoddly <250804054+botoddly@users.noreply.github.com>
+Date: Mon, 9 Nov 2026 22:00:47 +0100
+Subject: [PATCH] window-input-region: Add the public API and shared event code
+
+---
+ include/XDL/XDL.h                 | 59 +++++++++++++++++++++++++++++++
+ src/dynapi/SDL_dynapi.sym         |  1 +
+ src/dynapi/SDL_dynapi_overrides.h |  1 +
+ src/dynapi/SDL_dynapi_procs.h     |  1 +
+ src/events/SDL_mouse.c            | 49 +++++++++++++++++++++++++
+ src/events/SDL_mouse_c.h          |  9 ++++-
+ src/video/SDL_sysvideo.h          |  3 ++
+ src/video/SDL_video.c             | 43 ++++++++++++++++++++++
+ 8 files changed, 165 insertions(+), 1 deletion(-)
+
+diff --git a/include/XDL/XDL.h b/include/XDL/XDL.h
+index 63a0f4ccb6675b464e1be7ccafa76a3ca0923634..b88d67a153e58e063b3daa2dc7ea675bea5a323b 100644
+--- a/include/XDL/XDL.h
++++ b/include/XDL/XDL.h
+@@ -64,6 +64,9 @@ extern "C" {
+  * If windows with this enabled overlap, only one of them receives the input,
+  * and which one does not depend on their stacking order.
+  *
++ * Enabling fails for a window that has an input region, see
++ * XDL_SetWindowInputRegion().
++ *
+  * This is supported on Windows, macOS, and X11 with XInput 2.1 or later. It
+  * is not supported on Wayland, and under Xwayland it receives no input
+  * outside X11 windows.
+@@ -82,6 +85,62 @@ extern "C" {
+  */
+ extern SDL_DECLSPEC bool SDLCALL XDL_SetWindowMousePassthroughEvents(SDL_Window *window, bool enabled);
+ 
++/**
++ * Set the parts of a transparent window that take mouse input.
++ *
++ * A click inside one of the rectangles reaches the window as its own mouse
++ * events and not the windows beneath it. Everywhere else, mouse input passes
++ * through to the windows beneath. A count of 0 lets all mouse input through.
++ *
++ * The rectangles are in window coordinates, as mouse events report them, and
++ * rectangles with no area are ignored. They are copied, so the array can be
++ * freed afterwards. Each call replaces the previous region and any shape set
++ * by SDL_SetWindowShape(). Unlike a shape, the region doesn't change what the
++ * window shows, and it is meant to be updated as often as every frame.
++ *
++ * The window must have been created with the SDL_WINDOW_TRANSPARENT flag. A
++ * window can't have both an input region and mouse passthrough events: once
++ * it has a region, even an empty one, XDL_SetWindowMousePassthroughEvents()
++ * fails for it, and this fails while those events are enabled.
++ *
++ * Each platform takes the input in the region in its own way:
++ *
++ * - Wayland: the region is the surface's input region. It takes effect when
++ *   the window next presents a frame. The window takes all mouse input in
++ *   the region.
++ * - X11: the region is the window's input shape, which needs the X server's
++ *   SHAPE extension. The window takes all mouse input in the region.
++ * - Windows: the window lets all mouse input through, and a low-level mouse
++ *   hook keeps a left button press in the region, and its release, from the
++ *   windows beneath and reports both to the window. A press still reaches a
++ *   window above this one. Motion, the wheel and the other buttons always
++ *   reach the windows beneath, and the window doesn't take the keyboard
++ *   focus. If the hook can't be installed, this fails and the window still
++ *   lets all mouse input through.
++ * - macOS: Cocoa has no input region, so on each call the window takes all
++ *   mouse input if the cursor is inside the region, and none otherwise. The
++ *   window also updates this from the mouse motion it receives. A change of
++ *   the region under a cursor standing still takes effect on the next call,
++ *   so until then a click there may still reach the windows beneath, or be
++ *   taken outside the region.
++ *
++ * \param window the window.
++ * \param rects an array of rectangles in window coordinates, or NULL if
++ *              count is 0.
++ * \param count the number of rectangles, 0 to let all mouse input through.
++ * \returns true on success or false on failure, for example on a platform
++ *          that doesn't support it; call SDL_GetError() for more
++ *          information.
++ *
++ * \threadsafety This function should only be called on the main thread.
++ *
++ * \since This function is available since XDL 3.4.20-9.
++ *
++ * \sa SDL_SetWindowShape
++ * \sa XDL_SetWindowMousePassthroughEvents
++ */
++extern SDL_DECLSPEC bool SDLCALL XDL_SetWindowInputRegion(SDL_Window *window, const SDL_Rect *rects, int count);
++
+ /**
+  * WGSL shader source, for the WebGPU GPU driver on Emscripten.
+  *
+diff --git a/src/dynapi/SDL_dynapi.sym b/src/dynapi/SDL_dynapi.sym
+index cb754896b60f1c56e750287bb35b6aeaf48ecb0d..585bb3382db8311d17c354d06018631989fe83e3 100644
+--- a/src/dynapi/SDL_dynapi.sym
++++ b/src/dynapi/SDL_dynapi.sym
+@@ -1272,6 +1272,7 @@ SDL3_0.0.0 {
+     SDL_LoadSurface;
+     SDL_SetWindowFillDocument;
+     XDL_SetWindowMousePassthroughEvents;
++    XDL_SetWindowInputRegion;
+     # extra symbols go here (don't modify this line)
+   local: *;
+ };
+diff --git a/src/dynapi/SDL_dynapi_overrides.h b/src/dynapi/SDL_dynapi_overrides.h
+index 505b2c6a8e497e2614e44ecc05143fed7920c588..fd88cdd59bd16c01af2365e1c8d26bb54f422c00 100644
+--- a/src/dynapi/SDL_dynapi_overrides.h
++++ b/src/dynapi/SDL_dynapi_overrides.h
+@@ -1298,3 +1298,4 @@
+ #define SDL_LoadSurface SDL_LoadSurface_REAL
+ #define SDL_SetWindowFillDocument SDL_SetWindowFillDocument_REAL
+ #define XDL_SetWindowMousePassthroughEvents XDL_SetWindowMousePassthroughEvents_REAL
++#define XDL_SetWindowInputRegion XDL_SetWindowInputRegion_REAL
+diff --git a/src/dynapi/SDL_dynapi_procs.h b/src/dynapi/SDL_dynapi_procs.h
+index 29f1b579d7f462e83f04abec9f67bd15115651f2..849c7126032a3c3fa0c71edc663e0313ee434387 100644
+--- a/src/dynapi/SDL_dynapi_procs.h
++++ b/src/dynapi/SDL_dynapi_procs.h
+@@ -1306,3 +1306,4 @@ SDL_DYNAPI_PROC(SDL_Surface*,SDL_LoadSurface_IO,(SDL_IOStream *a,bool b),(a,b),r
+ SDL_DYNAPI_PROC(SDL_Surface*,SDL_LoadSurface,(const char *a),(a),return)
+ SDL_DYNAPI_PROC(bool,SDL_SetWindowFillDocument,(SDL_Window *a,bool b),(a,b),return)
+ SDL_DYNAPI_PROC(bool,XDL_SetWindowMousePassthroughEvents,(SDL_Window *a,bool b),(a,b),return)
++SDL_DYNAPI_PROC(bool,XDL_SetWindowInputRegion,(SDL_Window *a,const SDL_Rect *b,int c),(a,b,c),return)
+diff --git a/src/events/SDL_mouse.c b/src/events/SDL_mouse.c
+index 9114c51cb47dbc8d37a8d5339e1c23d2278d7f07..28e5299f22b8afb92bec1eac4f9aca9a9b1be94c 100644
+--- a/src/events/SDL_mouse.c
++++ b/src/events/SDL_mouse.c
+@@ -1175,6 +1175,55 @@ void SDL_UpdateMousePassthroughFocus(void)
+     mouse->passthrough_window = NULL;
+ }
+ 
++static bool SDL_IsInputRegionWindowEligible(SDL_Window *window)
++{
++    return window->has_input_region && !window->is_hiding && !window->is_destroying && !(window->flags & (SDL_WINDOW_HIDDEN | SDL_WINDOW_MINIMIZED));
++}
++
++void SDL_SendInputRegionMouseButton(Uint64 timestamp, SDL_Window *window, float x, float y, Uint8 button, bool down)
++{
++    SDL_Mouse *mouse = SDL_GetMouse();
++
++    if (button < SDL_BUTTON_LEFT || button > SDL_BUTTON_X2) {
++        return;
++    }
++
++    const SDL_MouseButtonFlags mask = SDL_BUTTON_MASK(button);
++    if (down) {
++        // A press of a button that is already held would be ignored, so it does not own the button.
++        if (!SDL_IsInputRegionWindowEligible(window) || (SDL_GetMouseButtonState(mouse, SDL_GLOBAL_MOUSE_ID, false) & mask)) {
++            return;
++        }
++        mouse->forwarded_buttons |= mask;
++        mouse->forwarded_button_windows[button] = window;
++    } else if (!(mouse->forwarded_buttons & mask) || mouse->forwarded_button_windows[button] != window) {
++        return;
++    }
++
++    if (SDL_IsInputRegionWindowEligible(window)) {
++        // The button event takes its position from the motion before it.
++        SDL_SendMouseMotion(timestamp, window, SDL_GLOBAL_MOUSE_ID, false, x, y);
++        SDL_SendMouseButton(timestamp, window, SDL_GLOBAL_MOUSE_ID, button, down);
++    } else {
++        // The window was hidden or minimized since the press, so the release only clears the button, without giving the window the focus.
++        SDL_SendMouseButton(timestamp, NULL, SDL_GLOBAL_MOUSE_ID, button, false);
++    }
++}
++
++void SDL_ForgetInputRegionWindow(SDL_Window *window)
++{
++    SDL_Mouse *mouse = SDL_GetMouse();
++
++    for (Uint8 button = SDL_BUTTON_LEFT; button <= SDL_BUTTON_X2; ++button) {
++        const SDL_MouseButtonFlags mask = SDL_BUTTON_MASK(button);
++        if ((mouse->forwarded_buttons & mask) && mouse->forwarded_button_windows[button] == window) {
++            SDL_SendMouseButton(0, NULL, SDL_GLOBAL_MOUSE_ID, button, false);
++            mouse->forwarded_buttons &= ~mask;
++            mouse->forwarded_button_windows[button] = NULL;
++        }
++    }
++}
++
+ void SDL_SendMouseWheel(Uint64 timestamp, SDL_Window *window, SDL_MouseID mouseID, float x, float y, SDL_MouseWheelDirection direction)
+ {
+     SDL_Mouse *mouse = SDL_GetMouse();
+diff --git a/src/events/SDL_mouse_c.h b/src/events/SDL_mouse_c.h
+index a64f3e3a0132eebf29ba7f83f073f2026df88762..7ed0fa2728722b2bfa16edaff78c8edaa5ab8779 100644
+--- a/src/events/SDL_mouse_c.h
++++ b/src/events/SDL_mouse_c.h
+@@ -158,7 +158,7 @@ typedef struct
+     bool capture_desired;
+     SDL_Window *capture_window;
+ 
+-    // Buttons pressed through mouse passthrough events and still held, and the window that received each press, indexed by button.
++    // Buttons pressed through mouse passthrough events or in a window's input region and still held, and the window that received each press, indexed by button.
+     SDL_MouseButtonFlags forwarded_buttons;
+     SDL_Window *forwarded_button_windows[SDL_BUTTON_X2 + 1];
+     // The window that received the last mouse passthrough event.
+@@ -263,6 +263,13 @@ extern void SDL_ForgetMousePassthroughWindow(SDL_Window *window);
+ // Drops the mouse focus of the last window that received mouse passthrough events, once it can no longer receive them.
+ extern void SDL_UpdateMousePassthroughFocus(void);
+ 
++// Report a button that a backend took from the windows beneath, in a window's input region, at (x, y) in window coordinates. Backends call it only
++// for input that the window does not receive natively. A press never captures the mouse, and a release is reported only if its press was, and once.
++extern void SDL_SendInputRegionMouseButton(Uint64 timestamp, SDL_Window *window, float x, float y, Uint8 button, bool down);
++
++// Releases the buttons a window received in its input region, when it is destroyed.
++extern void SDL_ForgetInputRegionWindow(SDL_Window *window);
++
+ // Shutdown the mouse subsystem
+ extern void SDL_QuitMouse(void);
+ 
+diff --git a/src/video/SDL_sysvideo.h b/src/video/SDL_sysvideo.h
+index fcb59a952ab57751ccff6f561c49d103b8a9997e..7171bfc97ff6a63fae40f4a062939e633225dc0d 100644
+--- a/src/video/SDL_sysvideo.h
++++ b/src/video/SDL_sysvideo.h
+@@ -109,6 +109,8 @@ struct SDL_Window
+     bool is_destroying;
+     bool is_dropping; // drag/drop in progress, expecting SDL_SendDropComplete().
+     bool mouse_passthrough_events;
++    // XDL_SetWindowInputRegion() set an input region. It stays set when the region is emptied, so the release of a press in it is still reported.
++    bool has_input_region;
+ 
+     int safe_inset_left;
+     int safe_inset_right;
+@@ -311,6 +313,7 @@ struct SDL_VideoDevice
+     void (*OnWindowEnter)(SDL_VideoDevice *_this, SDL_Window *window);
+     bool (*UpdateWindowShape)(SDL_VideoDevice *_this, SDL_Window *window, SDL_Surface *shape);
+     bool (*SetWindowMousePassthroughEvents)(SDL_VideoDevice *_this, SDL_Window *window, bool enabled);
++    bool (*SetWindowInputRegion)(SDL_VideoDevice *_this, SDL_Window *window, const SDL_Rect *rects, int count);
+     bool (*FlashWindow)(SDL_VideoDevice *_this, SDL_Window *window, SDL_FlashOperation operation);
+     bool (*ApplyWindowProgress)(SDL_VideoDevice *_this, SDL_Window *window);
+     bool (*SetWindowFocusable)(SDL_VideoDevice *_this, SDL_Window *window, bool focusable);
+diff --git a/src/video/SDL_video.c b/src/video/SDL_video.c
+index 8eda34d880d3ad3909cabfaad993bcc7ef5af712..7f16d6da8a87d0d2e6952da18ff8d19d98b74299 100644
+--- a/src/video/SDL_video.c
++++ b/src/video/SDL_video.c
+@@ -4533,6 +4533,11 @@ void SDL_DestroyWindow(SDL_Window *window)
+         XDL_SetWindowMousePassthroughEvents(window, false);
+     }
+ 
++    // Release a button pressed in the input region before the window is gone, as its release will never be reported.
++    if (window->has_input_region) {
++        SDL_ForgetInputRegionWindow(window);
++    }
++
+     SDL_SendWindowEvent(window, SDL_EVENT_WINDOW_DESTROYED, 0, 0);
+ 
+     SDL_DestroyWindowSurface(window);
+@@ -6224,6 +6229,9 @@ bool XDL_SetWindowMousePassthroughEvents(SDL_Window *window, bool enabled)
+     if (window->mouse_passthrough_events == enabled) {
+         return true;
+     }
++    if (enabled && window->has_input_region) {
++        return SDL_SetError("Window has an input region");
++    }
+     if (!_this->SetWindowMousePassthroughEvents(_this, window, enabled)) {
+         return false;
+     }
+@@ -6235,6 +6243,41 @@ bool XDL_SetWindowMousePassthroughEvents(SDL_Window *window, bool enabled)
+     return true;
+ }
+ 
++bool XDL_SetWindowInputRegion(SDL_Window *window, const SDL_Rect *rects, int count)
++{
++    SDL_PropertiesID props;
++
++    CHECK_WINDOW_MAGIC(window, false);
++
++    if (!(window->flags & SDL_WINDOW_TRANSPARENT)) {
++        return SDL_SetError("Window must be created with SDL_WINDOW_TRANSPARENT");
++    }
++    if (window->mouse_passthrough_events) {
++        return SDL_SetError("Window has mouse passthrough events enabled");
++    }
++    if (count < 0) {
++        return SDL_InvalidParamError("count");
++    }
++    if (count > 0 && !rects) {
++        return SDL_InvalidParamError("rects");
++    }
++    if (!_this->SetWindowInputRegion) {
++        return SDL_Unsupported();
++    }
++
++    // The region replaces any shape, and SDL applies the shape again when the window is resized.
++    props = SDL_GetWindowProperties(window);
++    if (!props || !SDL_ClearProperty(props, SDL_PROP_WINDOW_SHAPE_POINTER)) {
++        return false;
++    }
++
++    if (!_this->SetWindowInputRegion(_this, window, rects, count)) {
++        return false;
++    }
++    window->has_input_region = true;
++    return true;
++}
++
+ /*
+  * Functions used by iOS application delegates
+  */

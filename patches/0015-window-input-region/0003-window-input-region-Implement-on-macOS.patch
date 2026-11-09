@@ -1,0 +1,110 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: botoddly <250804054+botoddly@users.noreply.github.com>
+Date: Mon, 9 Nov 2026 22:01:46 +0100
+Subject: [PATCH] window-input-region: Implement on macOS
+
+---
+ src/video/cocoa/SDL_cocoashape.h  |  3 +++
+ src/video/cocoa/SDL_cocoashape.m  | 34 +++++++++++++++++++++++++++++++
+ src/video/cocoa/SDL_cocoavideo.m  |  1 +
+ src/video/cocoa/SDL_cocoawindow.h |  2 ++
+ src/video/cocoa/SDL_cocoawindow.m |  5 ++++-
+ 5 files changed, 44 insertions(+), 1 deletion(-)
+
+diff --git a/src/video/cocoa/SDL_cocoashape.h b/src/video/cocoa/SDL_cocoashape.h
+index 78fdb23ea42f790abe82430343f64a0464d48a8f..1496e47b624ea3cbd015af81d7d46dcfddaf3f68 100644
+--- a/src/video/cocoa/SDL_cocoashape.h
++++ b/src/video/cocoa/SDL_cocoashape.h
+@@ -26,5 +26,8 @@
+ extern bool Cocoa_UpdateWindowShape(SDL_VideoDevice *_this, SDL_Window *window, SDL_Surface *shape);
+ // Whether the window's shape lets mouse input through at (x, y) in window coordinates. A window without a shape never does.
+ extern bool Cocoa_IsShapeTransparentAt(SDL_Window *window, float x, float y);
++extern bool Cocoa_SetWindowInputRegion(SDL_VideoDevice *_this, SDL_Window *window, const SDL_Rect *rects, int count);
++// Whether (x, y), in window coordinates, is inside the window's input region.
++extern bool Cocoa_IsInInputRegion(SDL_Window *window, float x, float y);
+ 
+ #endif // SDL_cocoashape_h_
+diff --git a/src/video/cocoa/SDL_cocoashape.m b/src/video/cocoa/SDL_cocoashape.m
+index 32224e659b4bf30a007738e3f95c5a09522010ee..9605610856b5d99df5a5999984ee825e0cbfcad1 100644
+--- a/src/video/cocoa/SDL_cocoashape.m
++++ b/src/video/cocoa/SDL_cocoashape.m
+@@ -65,4 +65,38 @@ bool Cocoa_IsShapeTransparentAt(SDL_Window *window, float x, float y)
+     return !SDL_ReadSurfacePixel(shape, shape_x, shape_y, NULL, NULL, NULL, &a) || a == SDL_ALPHA_TRANSPARENT;
+ }
+ 
++bool Cocoa_IsInInputRegion(SDL_Window *window, float x, float y)
++{
++    SDL_CocoaWindowData *data = (__bridge SDL_CocoaWindowData *)window->internal;
++    const SDL_Rect *rects = (const SDL_Rect *)data.input_region.bytes;
++    const NSUInteger count = data.input_region.length / sizeof(SDL_Rect);
++
++    for (NSUInteger i = 0; i < count; ++i) {
++        const SDL_Rect *rect = &rects[i];
++        if (x >= (float)rect->x && y >= (float)rect->y && x < (float)rect->x + (float)rect->w && y < (float)rect->y + (float)rect->h) {
++            return true;
++        }
++    }
++    return false;
++}
++
++bool Cocoa_SetWindowInputRegion(SDL_VideoDevice *_this, SDL_Window *window, const SDL_Rect *rects, int count)
++{
++    @autoreleasepool {
++        SDL_CocoaWindowData *data = (__bridge SDL_CocoaWindowData *)window->internal;
++        SDL_FPoint point;
++
++        data.input_region = [NSData dataWithBytes:rects length:(NSUInteger)count * sizeof(*rects)];
++
++        /* Cocoa has no input region, so the window takes all mouse input or none, depending on whether the cursor is in the region now. The
++           window updates this from its own mouse motion too, but it gets none while it ignores mouse events, so a region that moves under a
++           cursor standing still needs this call. */
++        SDL_GetGlobalMouseState(&point.x, &point.y);
++        point.x -= window->x;
++        point.y -= window->y;
++        data.nswindow.ignoresMouseEvents = Cocoa_IsInInputRegion(window, point.x, point.y) ? NO : YES;
++        return true;
++    }
++}
++
+ #endif // SDL_VIDEO_DRIVER_COCOA
+diff --git a/src/video/cocoa/SDL_cocoavideo.m b/src/video/cocoa/SDL_cocoavideo.m
+index 909a3f9d7ef6b6b4c4f01c321f59152f8173c501..51fbbb7e64b6131ebacfb2186f0fe55257309110 100644
+--- a/src/video/cocoa/SDL_cocoavideo.m
++++ b/src/video/cocoa/SDL_cocoavideo.m
+@@ -122,6 +122,7 @@ static SDL_VideoDevice *Cocoa_CreateDevice(void)
+         device->AcceptDragAndDrop = Cocoa_AcceptDragAndDrop;
+         device->UpdateWindowShape = Cocoa_UpdateWindowShape;
+         device->SetWindowMousePassthroughEvents = Cocoa_SetWindowMousePassthroughEvents;
++        device->SetWindowInputRegion = Cocoa_SetWindowInputRegion;
+         device->FlashWindow = Cocoa_FlashWindow;
+         device->SetWindowFocusable = Cocoa_SetWindowFocusable;
+         device->SetWindowParent = Cocoa_SetWindowParent;
+diff --git a/src/video/cocoa/SDL_cocoawindow.h b/src/video/cocoa/SDL_cocoawindow.h
+index bc15a3bb345acc0958dae59bdc57e178e0336d74..ecc72d085527b2ab7f6a5ccbf3f53afb72b6ee88 100644
+--- a/src/video/cocoa/SDL_cocoawindow.h
++++ b/src/video/cocoa/SDL_cocoawindow.h
+@@ -155,6 +155,8 @@ typedef enum
+ @property(nonatomic) bool pending_position;
+ @property(nonatomic) bool border_toggled;
+ @property(nonatomic) bool has_modal_dialog;
++// The rectangles of the input region, as SDL_Rect, while the window has one.
++@property(nonatomic) NSData *input_region;
+ 
+ #ifdef SDL_VIDEO_OPENGL_EGL
+ @property(nonatomic) EGLSurface egl_surface;
+diff --git a/src/video/cocoa/SDL_cocoawindow.m b/src/video/cocoa/SDL_cocoawindow.m
+index 496665676fc05f7dd7e84aa72622c631331011ed..d656ba9dcaa69d1c8a3a8d68cda9339c3bfe2b88 100644
+--- a/src/video/cocoa/SDL_cocoawindow.m
++++ b/src/video/cocoa/SDL_cocoawindow.m
+@@ -1081,7 +1081,10 @@ static NSCursor *Cocoa_GetDesiredCursor(void)
+     NSRect windowRect = [[_data.nswindow contentView] frame];
+     BOOL ignoresMouseEvents = NO;
+ 
+-    if (NSMouseInRect(point, windowRect, NO) && Cocoa_IsShapeTransparentAt(window, point.x, window->h - point.y)) {
++    if (window->has_input_region) {
++        // The input region replaces the shape, and this keeps the window's own motion from undoing what Cocoa_SetWindowInputRegion() set.
++        ignoresMouseEvents = Cocoa_IsInInputRegion(window, (float)point.x, (float)(window->h - point.y)) ? NO : YES;
++    } else if (NSMouseInRect(point, windowRect, NO) && Cocoa_IsShapeTransparentAt(window, point.x, window->h - point.y)) {
+         ignoresMouseEvents = YES;
+     }
+     _data.nswindow.ignoresMouseEvents = ignoresMouseEvents;

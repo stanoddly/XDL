@@ -1,0 +1,174 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: botoddly <250804054+botoddly@users.noreply.github.com>
+Date: Mon, 9 Nov 2026 22:01:24 +0100
+Subject: [PATCH] window-input-region: Implement on Wayland and X11
+
+---
+ src/video/wayland/SDL_waylandshape.c | 36 ++++++++++++++++++++++
+ src/video/wayland/SDL_waylandshape.h |  1 +
+ src/video/wayland/SDL_waylandvideo.c |  1 +
+ src/video/x11/SDL_x11shape.c         | 46 ++++++++++++++++++++++++++++
+ src/video/x11/SDL_x11shape.h         |  1 +
+ src/video/x11/SDL_x11sym.h           |  2 ++
+ src/video/x11/SDL_x11video.c         |  1 +
+ 7 files changed, 88 insertions(+)
+
+diff --git a/src/video/wayland/SDL_waylandshape.c b/src/video/wayland/SDL_waylandshape.c
+index c5cc01ee8c3ce70de69f1814fdf890ea66efbefe..2f6cfdcf7380574436b3b07e7976a0f533335859 100644
+--- a/src/video/wayland/SDL_waylandshape.c
++++ b/src/video/wayland/SDL_waylandshape.c
+@@ -88,4 +88,40 @@ bool Wayland_UpdateWindowShape(SDL_VideoDevice *_this, SDL_Window *window, SDL_S
+     return true;
+ }
+ 
++bool Wayland_SetWindowInputRegion(SDL_VideoDevice *_this, SDL_Window *window, const SDL_Rect *rects, int count)
++{
++    SDL_VideoData *video = _this->internal;
++    SDL_WindowData *data = window->internal;
++    struct wl_region *region;
++    float scale_x = 1.0f, scale_y = 1.0f;
++    int i;
++
++    if (!data->surface) {
++        return SDL_SetError("Window has no surface");
++    }
++
++    // A region is in surface coordinates, which differ from window coordinates when scaling to the display or emulating a fullscreen mode.
++    if (window->w > 0 && window->h > 0) {
++        scale_x = (float)data->current.logical_width / (float)window->w;
++        scale_y = (float)data->current.logical_height / (float)window->h;
++    }
++
++    // An empty region lets all input through. The compositor applies the region with the surface's next commit, when the window presents a frame.
++    region = wl_compositor_create_region(video->compositor);
++    for (i = 0; i < count; ++i) {
++        const SDL_Rect *rect = &rects[i];
++        if (rect->w > 0 && rect->h > 0) {
++            // Rounded outward, so a scaled rectangle still covers every point of the original.
++            const int x0 = (int)SDL_floorf((float)rect->x * scale_x);
++            const int y0 = (int)SDL_floorf((float)rect->y * scale_y);
++            const int x1 = (int)SDL_ceilf((float)(rect->x + rect->w) * scale_x);
++            const int y1 = (int)SDL_ceilf((float)(rect->y + rect->h) * scale_y);
++            wl_region_add(region, x0, y0, x1 - x0, y1 - y0);
++        }
++    }
++    wl_surface_set_input_region(data->surface, region);
++    wl_region_destroy(region);
++    return true;
++}
++
+ #endif // SDL_VIDEO_DRIVER_WAYLAND
+diff --git a/src/video/wayland/SDL_waylandshape.h b/src/video/wayland/SDL_waylandshape.h
+index 27a83a88e7e22b152c995eaec6acecfedb5cff69..f27a2747f4509f142afbc1614c2f0f954c8f4b47 100644
+--- a/src/video/wayland/SDL_waylandshape.h
++++ b/src/video/wayland/SDL_waylandshape.h
+@@ -24,5 +24,6 @@
+ #define SDL_waylandshape_h_
+ 
+ extern bool Wayland_UpdateWindowShape(SDL_VideoDevice *_this, SDL_Window *window, SDL_Surface *shape);
++extern bool Wayland_SetWindowInputRegion(SDL_VideoDevice *_this, SDL_Window *window, const SDL_Rect *rects, int count);
+ 
+ #endif // SDL_waylandshape_h_
+diff --git a/src/video/wayland/SDL_waylandvideo.c b/src/video/wayland/SDL_waylandvideo.c
+index e94f42abcef2b70f9f419c8fe306e02c555b8dc8..be001e149a54a553a59bae370f83afd35500b2ed 100644
+--- a/src/video/wayland/SDL_waylandvideo.c
++++ b/src/video/wayland/SDL_waylandvideo.c
+@@ -676,6 +676,7 @@ static SDL_VideoDevice *Wayland_CreateDevice(bool require_preferred_protocols)
+     device->DestroyWindow = Wayland_DestroyWindow;
+     device->SetWindowHitTest = Wayland_SetWindowHitTest;
+     device->UpdateWindowShape = Wayland_UpdateWindowShape;
++    device->SetWindowInputRegion = Wayland_SetWindowInputRegion;
+     device->FlashWindow = Wayland_FlashWindow;
+ #ifdef SDL_USE_LIBDBUS
+     device->ApplyWindowProgress = DBUS_ApplyWindowProgress;
+diff --git a/src/video/x11/SDL_x11shape.c b/src/video/x11/SDL_x11shape.c
+index a8fefab2f06edd50d30c04d1b0e0b6f750393f83..9bc871a6e4a80ef3e1265779533069731b71d2b1 100644
+--- a/src/video/x11/SDL_x11shape.c
++++ b/src/video/x11/SDL_x11shape.c
+@@ -108,4 +108,50 @@ bool X11_UpdateWindowShape(SDL_VideoDevice *_this, SDL_Window *window, SDL_Surfa
+     return result;
+ }
+ 
++bool X11_SetWindowInputRegion(SDL_VideoDevice *_this, SDL_Window *window, const SDL_Rect *rects, int count)
++{
++#ifdef SDL_VIDEO_DRIVER_X11_XSHAPE
++    SDL_WindowData *windowdata = window->internal;
++    Display *display = windowdata->videodata->display;
++    XRectangle *xrects = NULL;
++    bool isstack = false;
++    int num_xrects = 0;
++    int event_base, error_base;
++    int i;
++
++    if (!SDL_X11_HAVE_XSHAPE || !X11_XShapeQueryExtension(display, &event_base, &error_base)) {
++        return SDL_SetError("The X server doesn't support the SHAPE extension");
++    }
++
++    if (count > 0) {
++        xrects = SDL_small_alloc(XRectangle, count, &isstack);
++        if (!xrects) {
++            return false;
++        }
++    }
++    // X rectangles have 16-bit coordinates, and one with no area would wrap around to a huge one.
++    for (i = 0; i < count; ++i) {
++        const SDL_Rect *rect = &rects[i];
++        if (rect->w > 0 && rect->h > 0) {
++            XRectangle *xrect = &xrects[num_xrects++];
++            xrect->x = (short)SDL_clamp(rect->x, SDL_MIN_SINT16, SDL_MAX_SINT16);
++            xrect->y = (short)SDL_clamp(rect->y, SDL_MIN_SINT16, SDL_MAX_SINT16);
++            xrect->width = (unsigned short)SDL_min(rect->w, SDL_MAX_UINT16);
++            xrect->height = (unsigned short)SDL_min(rect->h, SDL_MAX_UINT16);
++        }
++    }
++
++    // The input shape leaves what the window shows alone. An empty one lets all input through.
++    X11_XShapeCombineRectangles(display, windowdata->xwindow, ShapeInput, 0, 0, xrects, num_xrects, ShapeSet, Unsorted);
++    X11_XFlush(display);
++
++    if (xrects) {
++        SDL_small_free(xrects, isstack);
++    }
++    return true;
++#else
++    return SDL_Unsupported();
++#endif // SDL_VIDEO_DRIVER_X11_XSHAPE
++}
++
+ #endif // SDL_VIDEO_DRIVER_X11
+diff --git a/src/video/x11/SDL_x11shape.h b/src/video/x11/SDL_x11shape.h
+index eee2b8032278b4d452bc3df1315d70b4b1e179d9..7f3843f794717f787c7af1d00e7a591da5b6d404 100644
+--- a/src/video/x11/SDL_x11shape.h
++++ b/src/video/x11/SDL_x11shape.h
+@@ -24,5 +24,6 @@
+ #define SDL_x11shape_h_
+ 
+ extern bool X11_UpdateWindowShape(SDL_VideoDevice *_this, SDL_Window *window, SDL_Surface *shape);
++extern bool X11_SetWindowInputRegion(SDL_VideoDevice *_this, SDL_Window *window, const SDL_Rect *rects, int count);
+ 
+ #endif // SDL_x11shape_h_
+diff --git a/src/video/x11/SDL_x11sym.h b/src/video/x11/SDL_x11sym.h
+index e195346a6fb56a393c6bf04d9832934505e5d812..42434f03bd2f43d71fea5a77dd2de0083deafaaf 100644
+--- a/src/video/x11/SDL_x11sym.h
++++ b/src/video/x11/SDL_x11sym.h
+@@ -360,6 +360,8 @@ SDL_X11_SYM(void,XScreenSaverSuspend,(Display *dpy,Bool suspend))
+ SDL_X11_MODULE(XSHAPE)
+ SDL_X11_SYM(void,XShapeCombineMask,(Display *dpy,Window dest,int dest_kind,int x_off,int y_off,Pixmap src,int op))
+ SDL_X11_SYM(void,XShapeCombineRegion,(Display *a,Window b,int c,int d,int e,Region f,int g))
++SDL_X11_SYM(void,XShapeCombineRectangles,(Display *a,Window b,int c,int d,int e,XRectangle *f,int g,int h,int i))
++SDL_X11_SYM(Bool,XShapeQueryExtension,(Display *a,int *b,int *c))
+ #endif
+ 
+ #undef SDL_X11_MODULE
+diff --git a/src/video/x11/SDL_x11video.c b/src/video/x11/SDL_x11video.c
+index 7e1d97467e7644843fb5183f00777e853f31b165..414180c0fa70dc22ae2e5f51e9860dad67b956ca 100644
+--- a/src/video/x11/SDL_x11video.c
++++ b/src/video/x11/SDL_x11video.c
+@@ -191,6 +191,7 @@ static SDL_VideoDevice *X11_CreateDevice(void)
+     device->AcceptDragAndDrop = X11_AcceptDragAndDrop;
+     device->UpdateWindowShape = X11_UpdateWindowShape;
+     device->SetWindowMousePassthroughEvents = X11_SetWindowMousePassthroughEvents;
++    device->SetWindowInputRegion = X11_SetWindowInputRegion;
+     device->FlashWindow = X11_FlashWindow;
+ #ifdef SDL_USE_LIBDBUS
+     device->ApplyWindowProgress = DBUS_ApplyWindowProgress;
