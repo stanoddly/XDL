@@ -1,0 +1,81 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: botoddly <250804054+botoddly@users.noreply.github.com>
+Date: Mon, 9 Nov 2026 15:52:30 +0100
+Subject: [PATCH] vulkan-cleanup-every-submit: Free finished work on every
+ submit
+
+---
+ src/gpu/vulkan/SDL_gpu_vulkan.c | 34 ++++++++++++++++++---------------
+ 1 file changed, 19 insertions(+), 15 deletions(-)
+
+diff --git a/src/gpu/vulkan/SDL_gpu_vulkan.c b/src/gpu/vulkan/SDL_gpu_vulkan.c
+index 7c11bdffd47a2109799a87a2a7cf74341e99a9fc..15d8743ca909f01aa095dc04828c189af4b0f68e 100644
+--- a/src/gpu/vulkan/SDL_gpu_vulkan.c
++++ b/src/gpu/vulkan/SDL_gpu_vulkan.c
+@@ -10810,7 +10810,11 @@ static bool VULKAN_Submit(
+     Uint32 swapchainImageIndex;
+     VulkanTextureSubresource *swapchainTextureSubresource;
+     VulkanMemorySubAllocator *allocator;
+-    bool performCleanups =
++    /* With a window claimed, defrag and freeing empty allocations wait for a submit that requested a swapchain texture.
++     * Finished command buffers and pending destroys are cleaned on every submit,
++     * so that resources a finished submission used become available again without a frame.
++     */
++    bool performMemoryMaintenance =
+         (renderer->claimedWindowCount > 0 && vulkanCommandBuffer->swapchainRequested) ||
+         renderer->claimedWindowCount == 0;
+ 
+@@ -10844,7 +10848,7 @@ static bool VULKAN_Submit(
+     SDL_LockMutex(renderer->acquireCommandBufferLock);
+     SDL_LockMutex(renderer->disposeLock);
+ 
+-    if (performCleanups &&
++    if (performMemoryMaintenance &&
+         renderer->openCommandBufferCount == 1 &&
+         renderer->allocationsToDefragCount > 0 &&
+         !renderer->defragInProgress) {
+@@ -10946,20 +10950,20 @@ static bool VULKAN_Submit(
+             (presentData->windowData->frameCounter + 1) % renderer->allowedFramesInFlight;
+     }
+ 
+-    if (performCleanups) {
+-        for (Sint32 i = renderer->submittedCommandBufferCount - 1; i >= 0; i -= 1) {
+-            vulkanResult = renderer->vkGetFenceStatus(
+-                renderer->logicalDevice,
+-                renderer->submittedCommandBuffers[i]->inFlightFence->fence);
++    for (Sint32 i = renderer->submittedCommandBufferCount - 1; i >= 0; i -= 1) {
++        vulkanResult = renderer->vkGetFenceStatus(
++            renderer->logicalDevice,
++            renderer->submittedCommandBuffers[i]->inFlightFence->fence);
+ 
+-            if (vulkanResult == VK_SUCCESS) {
+-                VULKAN_INTERNAL_CleanCommandBuffer(
+-                    renderer,
+-                    renderer->submittedCommandBuffers[i],
+-                    false);
+-            }
++        if (vulkanResult == VK_SUCCESS) {
++            VULKAN_INTERNAL_CleanCommandBuffer(
++                renderer,
++                renderer->submittedCommandBuffers[i],
++                false);
+         }
++    }
+ 
++    if (performMemoryMaintenance) {
+         if (renderer->checkEmptyAllocations) {
+             SDL_LockMutex(renderer->allocatorLock);
+ 
+@@ -10980,10 +10984,10 @@ static bool VULKAN_Submit(
+ 
+             SDL_UnlockMutex(renderer->allocatorLock);
+         }
+-
+-        VULKAN_INTERNAL_PerformPendingDestroys(renderer);
+     }
+ 
++    VULKAN_INTERNAL_PerformPendingDestroys(renderer);
++
+     // Mark command buffer as submitted
+     VULKAN_INTERNAL_ReleaseCommandBuffer(vulkanCommandBuffer);
+ 

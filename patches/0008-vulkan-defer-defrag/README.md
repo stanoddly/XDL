@@ -1,6 +1,6 @@
 # Defer Vulkan memory defrag while a command buffer is open
 
-SDL's Vulkan backend can defragment memory on any submit where cleanups run. With no window claimed, that is every submit. Defrag moves textures and leaves each old image in a copy layout. It only skips allocations that a transfer references, so a texture bound in another command buffer that is still open can be moved. When that command buffer is submitted, it samples the old image in the wrong layout, and validation reports `VUID-vkCmdDraw-None-09600`.
+SDL's Vulkan backend can defragment memory on any submit when no window is claimed, and otherwise on a submit that requested a swapchain texture. Defrag moves textures and leaves each old image in a copy layout. It only skips allocations that a transfer references, so a texture bound in another command buffer that is still open can be moved. When that command buffer is submitted, it samples the old image in the wrong layout, and validation reports `VUID-vkCmdDraw-None-09600`.
 
 This patch counts open command buffers and lets a submit defragment only when no other one is open. For example, with an upload command buffer and a frame command buffer open, submitting the uploads defers defrag, and submitting the frame then runs it.
 

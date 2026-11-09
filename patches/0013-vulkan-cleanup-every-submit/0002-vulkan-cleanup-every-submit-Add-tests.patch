@@ -1,0 +1,153 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: botoddly <250804054+botoddly@users.noreply.github.com>
+Date: Mon, 9 Nov 2026 15:52:30 +0100
+Subject: [PATCH] vulkan-cleanup-every-submit: Add tests
+
+---
+ test/CMakeLists.txt   |   1 +
+ test/testgpucleanup.c | 124 ++++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 125 insertions(+)
+ create mode 100644 test/testgpucleanup.c
+
+diff --git a/test/CMakeLists.txt b/test/CMakeLists.txt
+index 6fd79863471c586edb085d4b66d9c882ee791840..ec82f0d7e3bab1d035149eeb69bbd099e66cc6e4 100644
+--- a/test/CMakeLists.txt
++++ b/test/CMakeLists.txt
+@@ -334,6 +334,7 @@ add_sdl_test_executable(testintersections SOURCES testintersections.c)
+ add_sdl_test_executable(testrelative SOURCES testrelative.c)
+ add_sdl_test_executable(testhittesting SOURCES testhittesting.c)
+ add_sdl_test_executable(testmousepassthrough SOURCES testmousepassthrough.c)
++add_sdl_test_executable(testgpucleanup SOURCES testgpucleanup.c)
+ add_sdl_test_executable(testdraw SOURCES testdraw.c)
+ add_sdl_test_executable(testdrawchessboard SOURCES testdrawchessboard.c)
+ add_sdl_test_executable(testdropfile MAIN_CALLBACKS SOURCES testdropfile.c)
+diff --git a/test/testgpucleanup.c b/test/testgpucleanup.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..ed5b0246368fa2987085a37fdffb7e39e488c2ac
+--- /dev/null
++++ b/test/testgpucleanup.c
+@@ -0,0 +1,124 @@
++/*
++  Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
++
++  This software is provided 'as-is', without any express or implied
++  warranty.  In no event will the authors be held liable for any damages
++  arising from the use of this software.
++
++  Permission is granted to anyone to use this software for any purpose,
++  including commercial applications, and to alter it and redistribute it
++  freely.
++*/
++
++/* Uploads through a cycled transfer buffer with a window claimed, without ever requesting a swapchain texture.
++ * Each upload waits until the previous one has finished, so a backend that frees finished work on every submit
++ * alternates between at most two transfer buffers. A backend that waits for a frame creates a new one every time.
++ * Fences are kept until the end, because a released fence can be reused while a command buffer still points to it.
++ */
++
++#include <SDL3/SDL.h>
++#include <SDL3/SDL_main.h>
++
++#define UPLOAD_COUNT 20
++#define UPLOAD_SIZE (1024 * 1024)
++#define UPLOAD_TIMEOUT_NS (SDL_NS_PER_SECOND * 5)
++
++int main(int argc, char *argv[])
++{
++    SDL_Window *window = NULL;
++    SDL_GPUDevice *device = NULL;
++    SDL_GPUBuffer *buffer = NULL;
++    SDL_GPUTransferBuffer *transfer = NULL;
++    SDL_GPUFence *fences[UPLOAD_COUNT] = { NULL };
++    void *mappings[UPLOAD_COUNT];
++    int mapping_count = 0;
++    int result = 1;
++
++    if (!SDL_Init(SDL_INIT_VIDEO)) {
++        SDL_Log("SDL_Init failed: %s", SDL_GetError());
++        return 1;
++    }
++
++    window = SDL_CreateWindow("testgpucleanup", 64, 64, 0);
++    device = SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_SPIRV | SDL_GPU_SHADERFORMAT_DXIL | SDL_GPU_SHADERFORMAT_MSL, true, NULL);
++    if (!window || !device || !SDL_ClaimWindowForGPUDevice(device, window)) {
++        SDL_Log("Setup failed: %s", SDL_GetError());
++        goto quit;
++    }
++    SDL_Log("GPU driver: %s", SDL_GetGPUDeviceDriver(device));
++
++    SDL_GPUBufferCreateInfo buffer_info = { .usage = SDL_GPU_BUFFERUSAGE_VERTEX, .size = UPLOAD_SIZE };
++    SDL_GPUTransferBufferCreateInfo transfer_info = { .usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD, .size = UPLOAD_SIZE };
++    buffer = SDL_CreateGPUBuffer(device, &buffer_info);
++    transfer = SDL_CreateGPUTransferBuffer(device, &transfer_info);
++    if (!buffer || !transfer) {
++        SDL_Log("Creating the buffers failed: %s", SDL_GetError());
++        goto quit;
++    }
++
++    for (int i = 0; i < UPLOAD_COUNT; i++) {
++        void *mapped = SDL_MapGPUTransferBuffer(device, transfer, true);
++        if (!mapped) {
++            SDL_Log("SDL_MapGPUTransferBuffer failed: %s", SDL_GetError());
++            goto quit;
++        }
++        SDL_memset(mapped, i, UPLOAD_SIZE);
++        SDL_UnmapGPUTransferBuffer(device, transfer);
++
++        bool seen = false;
++        for (int j = 0; j < mapping_count; j++) {
++            seen = seen || mappings[j] == mapped;
++        }
++        if (!seen) {
++            mappings[mapping_count++] = mapped;
++        }
++
++        SDL_GPUCommandBuffer *cmd = SDL_AcquireGPUCommandBuffer(device);
++        SDL_GPUCopyPass *copy_pass = SDL_BeginGPUCopyPass(cmd);
++        SDL_GPUTransferBufferLocation source = { .transfer_buffer = transfer };
++        SDL_GPUBufferRegion destination = { .buffer = buffer, .size = UPLOAD_SIZE };
++        SDL_UploadToGPUBuffer(copy_pass, &source, &destination, true);
++        SDL_EndGPUCopyPass(copy_pass);
++        fences[i] = SDL_SubmitGPUCommandBufferAndAcquireFence(cmd);
++        if (!fences[i]) {
++            SDL_Log("SDL_SubmitGPUCommandBufferAndAcquireFence failed: %s", SDL_GetError());
++            goto quit;
++        }
++
++        // SDL_WaitForGPUFences would free finished work itself, so poll instead.
++        // A failed query returns false like an unfinished fence, so only the error tells them apart.
++        Uint64 deadline = SDL_GetTicksNS() + UPLOAD_TIMEOUT_NS;
++        SDL_ClearError();
++        while (!SDL_QueryGPUFence(device, fences[i])) {
++            // Cleanup waits for the GPU, which would hang if it is stuck or lost, so leave the resources to process exit.
++            if (*SDL_GetError() || SDL_GetTicksNS() > deadline) {
++                SDL_Log("Upload %d did not finish: %s", i, *SDL_GetError() ? SDL_GetError() : "timed out after 5 seconds");
++                SDL_Log("testgpucleanup FAILED");
++                return 1;
++            }
++            SDL_Delay(1);
++        }
++    }
++
++    SDL_Log("Distinct transfer buffer mappings in %d uploads: %d", UPLOAD_COUNT, mapping_count);
++    result = mapping_count <= 2 ? 0 : 1;
++
++quit:
++    if (device) {
++        for (int i = 0; i < UPLOAD_COUNT; i++) {
++            if (fences[i]) {
++                SDL_ReleaseGPUFence(device, fences[i]);
++            }
++        }
++        SDL_ReleaseGPUTransferBuffer(device, transfer);
++        SDL_ReleaseGPUBuffer(device, buffer);
++        if (window) {
++            SDL_ReleaseWindowFromGPUDevice(device, window);
++        }
++        SDL_DestroyGPUDevice(device);
++    }
++    SDL_DestroyWindow(window);
++    SDL_Log("testgpucleanup %s", result == 0 ? "PASSED" : "FAILED");
++    SDL_Quit();
++    return result;
++}
