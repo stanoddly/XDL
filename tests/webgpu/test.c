@@ -708,6 +708,113 @@ static bool ReadMultisampleStorageTexture(SDL_GPUDevice *device, Uint8 out_pixel
     return true;
 }
 
+#define DEPTH_VERTEX_CODE(z) \
+    "@vertex fn main(@builtin(vertex_index) index: u32) -> @builtin(position) vec4f {\n" \
+    "    return vec4f(f32(index & 1u) * 4.0 - 1.0, f32(index >> 1u) * 4.0 - 1.0, " z ", 1.0);\n" \
+    "}\n"
+
+static SDL_GPUGraphicsPipeline *CreateDepthTestedPipeline(SDL_GPUDevice *device, const char *vertex_code, bool with_color)
+{
+    static const char fragment_code[] = "@fragment fn main() -> @location(0) vec4f { return vec4f(1.0, 0.0, 0.0, 1.0); }\n";
+    SDL_GPUShader *vertex_shader = CreateShader(device, vertex_code, SDL_GPU_SHADERSTAGE_VERTEX, 0);
+    SDL_GPUShader *fragment_shader = with_color ? CreateShader(device, fragment_code, SDL_GPU_SHADERSTAGE_FRAGMENT, 0) : NULL;
+    if (!vertex_shader || (with_color && !fragment_shader)) {
+        return NULL;
+    }
+
+    SDL_GPUColorTargetDescription color_target_description = { .format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM };
+    SDL_GPUGraphicsPipelineCreateInfo info = {
+        .vertex_shader = vertex_shader,
+        .fragment_shader = fragment_shader,
+        .primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST,
+        .depth_stencil_state = { .compare_op = SDL_GPU_COMPAREOP_LESS, .enable_depth_test = true, .enable_depth_write = !with_color },
+        .target_info = {
+            .color_target_descriptions = with_color ? &color_target_description : NULL,
+            .num_color_targets = with_color ? 1 : 0,
+            .depth_stencil_format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT,
+            .has_depth_stencil_target = true,
+        },
+    };
+    SDL_GPUGraphicsPipeline *pipeline = SDL_CreateGPUGraphicsPipeline(device, &info);
+    SDL_ReleaseGPUShader(device, vertex_shader);
+    if (fragment_shader) {
+        SDL_ReleaseGPUShader(device, fragment_shader);
+    }
+    return pipeline;
+}
+
+// A pipeline without a fragment shader writes depth: a draw at z 0.75 behind its z 0.5 fails the depth test,
+// while the same draw against a cleared depth buffer passes. Out pixels are those of the first and second color target.
+static bool DrawDepthOnly(SDL_GPUDevice *device, Uint8 out_behind[4], Uint8 out_control[4])
+{
+    SDL_GPUGraphicsPipeline *depth_pipeline = CreateDepthTestedPipeline(device, DEPTH_VERTEX_CODE("0.5"), false);
+    SDL_GPUGraphicsPipeline *color_pipeline = CreateDepthTestedPipeline(device, DEPTH_VERTEX_CODE("0.75"), true);
+    SDL_GPUTextureCreateInfo depth_info = {
+        .type = SDL_GPU_TEXTURETYPE_2D,
+        .format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT,
+        .usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET,
+        .width = 4,
+        .height = 4,
+        .layer_count_or_depth = 1,
+        .num_levels = 1,
+    };
+    SDL_GPUTextureCreateInfo color_info = depth_info;
+    color_info.format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
+    color_info.usage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET;
+    SDL_GPUTexture *depths[2] = { SDL_CreateGPUTexture(device, &depth_info), SDL_CreateGPUTexture(device, &depth_info) };
+    SDL_GPUTexture *colors[2] = { SDL_CreateGPUTexture(device, &color_info), SDL_CreateGPUTexture(device, &color_info) };
+    SDL_GPUTransferBufferCreateInfo transfer_info = { .usage = SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD, .size = 8 };
+    SDL_GPUTransferBuffer *transfer = SDL_CreateGPUTransferBuffer(device, &transfer_info);
+    if (!depth_pipeline || !color_pipeline || !depths[0] || !depths[1] || !colors[0] || !colors[1] || !transfer) {
+        return SDL_SetError("Creating the depth-only resources failed: %s", SDL_GetError());
+    }
+
+    SDL_GPUCommandBuffer *cmd = SDL_AcquireGPUCommandBuffer(device);
+    SDL_GPUDepthStencilTargetInfo depth_only_target = { .texture = depths[0], .clear_depth = 1.0f, .load_op = SDL_GPU_LOADOP_CLEAR, .store_op = SDL_GPU_STOREOP_STORE };
+    SDL_GPURenderPass *render_pass = SDL_BeginGPURenderPass(cmd, NULL, 0, &depth_only_target);
+    SDL_BindGPUGraphicsPipeline(render_pass, depth_pipeline);
+    SDL_DrawGPUPrimitives(render_pass, 3, 1, 0, 0);
+    SDL_EndGPURenderPass(render_pass);
+
+    for (int i = 0; i < 2; i++) {
+        SDL_GPUColorTargetInfo color_target = { .texture = colors[i], .clear_color = { 0.0f, 0.0f, 1.0f, 1.0f }, .load_op = SDL_GPU_LOADOP_CLEAR, .store_op = SDL_GPU_STOREOP_STORE };
+        SDL_GPUDepthStencilTargetInfo depth_target = { .texture = depths[i], .clear_depth = 1.0f, .load_op = i == 0 ? SDL_GPU_LOADOP_LOAD : SDL_GPU_LOADOP_CLEAR, .store_op = SDL_GPU_STOREOP_DONT_CARE };
+        render_pass = SDL_BeginGPURenderPass(cmd, &color_target, 1, &depth_target);
+        SDL_BindGPUGraphicsPipeline(render_pass, color_pipeline);
+        SDL_DrawGPUPrimitives(render_pass, 3, 1, 0, 0);
+        SDL_EndGPURenderPass(render_pass);
+    }
+
+    SDL_GPUCopyPass *copy_pass = SDL_BeginGPUCopyPass(cmd);
+    for (Uint32 i = 0; i < 2; i++) {
+        SDL_GPUTextureRegion region = { .texture = colors[i], .w = 1, .h = 1, .d = 1 };
+        SDL_GPUTextureTransferInfo destination = { .transfer_buffer = transfer, .offset = i * 4 };
+        SDL_DownloadFromGPUTexture(copy_pass, &region, &destination);
+    }
+    SDL_EndGPUCopyPass(copy_pass);
+    if (!SDL_SubmitGPUCommandBuffer(cmd)) {
+        return SDL_SetError("SDL_SubmitGPUCommandBuffer: %s", SDL_GetError());
+    }
+    SDL_WaitForGPUIdle(device);
+
+    Uint8 *mapped = SDL_MapGPUTransferBuffer(device, transfer, false);
+    if (!mapped) {
+        return SDL_SetError("SDL_MapGPUTransferBuffer: %s", SDL_GetError());
+    }
+    SDL_memcpy(out_behind, mapped, 4);
+    SDL_memcpy(out_control, mapped + 4, 4);
+    SDL_UnmapGPUTransferBuffer(device, transfer);
+
+    SDL_ReleaseGPUTransferBuffer(device, transfer);
+    for (int i = 0; i < 2; i++) {
+        SDL_ReleaseGPUTexture(device, colors[i]);
+        SDL_ReleaseGPUTexture(device, depths[i]);
+    }
+    SDL_ReleaseGPUGraphicsPipeline(device, color_pipeline);
+    SDL_ReleaseGPUGraphicsPipeline(device, depth_pipeline);
+    return true;
+}
+
 static SDL_AssertState SDLCALL CountAssertion(const SDL_AssertData *data, void *userdata)
 {
     SDL_Log("Assertion: %s", data->condition);
@@ -1126,6 +1233,55 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv)
     }
     SDL_Log("Multisample storage texture: %u %u %u %u", multisample_pixel[0], multisample_pixel[1], multisample_pixel[2], multisample_pixel[3]);
     if (multisample_pixel[0] != 255 || multisample_pixel[3] != 255) {
+        return SDL_APP_FAILURE;
+    }
+
+    // A pipeline without a fragment shader releases the empty fragment layouts it created. Drawing is left out here,
+    // because cached bind groups keep their layouts until they expire. The first wait destroys resources released earlier.
+    SDL_WaitForGPUIdle(state->device);
+    int layouts_before_depth_only = CountLiveLayouts();
+    SDL_GPUGraphicsPipeline *depth_only_pipeline = CreateDepthTestedPipeline(state->device, DEPTH_VERTEX_CODE("0.5"), false);
+    if (!depth_only_pipeline) {
+        SDL_Log("Creating a depth-only pipeline failed: %s", SDL_GetError());
+        return SDL_APP_FAILURE;
+    }
+    SDL_ReleaseGPUGraphicsPipeline(state->device, depth_only_pipeline);
+    SDL_WaitForGPUIdle(state->device);
+    int layouts_after_depth_only = CountLiveLayouts();
+
+    // A pipeline with a color target still needs a fragment shader, because WebGPU keeps color targets in the fragment state.
+    SDL_GPUShader *depth_vertex_shader = CreateShader(state->device, DEPTH_VERTEX_CODE("0.5"), SDL_GPU_SHADERSTAGE_VERTEX, 0);
+    if (!depth_vertex_shader) {
+        SDL_Log("Creating the depth vertex shader failed: %s", SDL_GetError());
+        return SDL_APP_FAILURE;
+    }
+    SDL_GPUColorTargetDescription color_without_fragment_target = { .format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM };
+    SDL_GPUGraphicsPipelineCreateInfo color_without_fragment_info = {
+        .vertex_shader = depth_vertex_shader,
+        .primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST,
+        .target_info = { .color_target_descriptions = &color_without_fragment_target, .num_color_targets = 1 },
+    };
+    int color_without_fragment_assertions = 0;
+    SDL_AssertionHandler original_handler = SDL_GetAssertionHandler(NULL);
+    SDL_SetAssertionHandler(CountAssertion, &color_without_fragment_assertions);
+    SDL_GPUGraphicsPipeline *color_without_fragment = SDL_CreateGPUGraphicsPipeline(state->device, &color_without_fragment_info);
+    SDL_SetAssertionHandler(original_handler, NULL);
+    SDL_ReleaseGPUShader(state->device, depth_vertex_shader);
+    SDL_Log("Pipeline with a color target and no fragment shader: %s, %d assertions", color_without_fragment ? "created" : "rejected", color_without_fragment_assertions);
+    if (color_without_fragment || color_without_fragment_assertions != 1) {
+        return SDL_APP_FAILURE;
+    }
+
+    Uint8 behind_pixel[4] = { 0 };
+    Uint8 control_pixel[4] = { 0 };
+    if (!DrawDepthOnly(state->device, behind_pixel, control_pixel)) {
+        SDL_Log("Drawing with a depth-only pipeline failed: %s", SDL_GetError());
+        return SDL_APP_FAILURE;
+    }
+    SDL_Log("Depth-only pipeline: pixel behind its depth %u %u %u %u, control pixel %u %u %u %u, live layouts %d before and %d after",
+            behind_pixel[0], behind_pixel[1], behind_pixel[2], behind_pixel[3], control_pixel[0], control_pixel[1], control_pixel[2], control_pixel[3],
+            layouts_before_depth_only, layouts_after_depth_only);
+    if (behind_pixel[0] != 0 || behind_pixel[2] != 255 || control_pixel[0] != 255 || control_pixel[2] != 0 || layouts_after_depth_only != layouts_before_depth_only) {
         return SDL_APP_FAILURE;
     }
 

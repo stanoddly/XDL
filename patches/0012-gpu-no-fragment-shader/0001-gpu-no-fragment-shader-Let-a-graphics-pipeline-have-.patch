@@ -1,0 +1,249 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: botoddly <250804054+botoddly@users.noreply.github.com>
+Date: Mon, 9 Nov 2026 15:21:02 +0100
+Subject: [PATCH] gpu-no-fragment-shader: Let a graphics pipeline have no
+ fragment shader
+
+---
+ include/SDL3/SDL_gpu.h          |  2 +-
+ src/gpu/SDL_gpu.c               |  4 ++--
+ src/gpu/d3d12/SDL_gpu_d3d12.c   |  9 ++++++++-
+ src/gpu/metal/SDL_gpu_metal.m   | 14 ++++++++------
+ src/gpu/vulkan/SDL_gpu_vulkan.c | 33 ++++++++++++++++++++++-----------
+ src/gpu/webgpu/SDL_gpu_webgpu.c | 29 +++++++++++++++++++++++------
+ 6 files changed, 64 insertions(+), 27 deletions(-)
+
+diff --git a/include/SDL3/SDL_gpu.h b/include/SDL3/SDL_gpu.h
+index b3e9a89540a1aff30fefc1b14b2ff9e6a83d69ee..ec63466c5bfadb03020be019aa0e543089cb4cec 100644
+--- a/include/SDL3/SDL_gpu.h
++++ b/include/SDL3/SDL_gpu.h
+@@ -1948,7 +1948,7 @@ typedef struct SDL_GPUGraphicsPipelineTargetInfo
+ typedef struct SDL_GPUGraphicsPipelineCreateInfo
+ {
+     SDL_GPUShader *vertex_shader;                   /**< The vertex shader used by the graphics pipeline. */
+-    SDL_GPUShader *fragment_shader;                 /**< The fragment shader used by the graphics pipeline. */
++    SDL_GPUShader *fragment_shader;                 /**< The fragment shader used by the graphics pipeline. Can be NULL if the pipeline has no color targets, such as for a depth-only pass. */
+     SDL_GPUVertexInputState vertex_input_state;     /**< The vertex layout of the graphics pipeline. */
+     SDL_GPUPrimitiveType primitive_type;            /**< The primitive topology of the graphics pipeline. */
+     SDL_GPURasterizerState rasterizer_state;        /**< The rasterizer state of the graphics pipeline. */
+diff --git a/src/gpu/SDL_gpu.c b/src/gpu/SDL_gpu.c
+index 7959aacefbed76eeb8c631a1a65f706fc01f798f..9d5bff6fc24f484c50ff6146767abe0949775f2b 100644
+--- a/src/gpu/SDL_gpu.c
++++ b/src/gpu/SDL_gpu.c
+@@ -1050,8 +1050,8 @@ SDL_GPUGraphicsPipeline *SDL_CreateGPUGraphicsPipeline(
+             SDL_assert_release(!"Vertex shader cannot be NULL!");
+             return NULL;
+         }
+-        if (graphicsPipelineCreateInfo->fragment_shader == NULL) {
+-            SDL_assert_release(!"Fragment shader cannot be NULL!");
++        if (graphicsPipelineCreateInfo->fragment_shader == NULL && graphicsPipelineCreateInfo->target_info.num_color_targets > 0) {
++            SDL_assert_release(!"A graphics pipeline without a fragment shader cannot have color targets!");
+             return NULL;
+         }
+         if (graphicsPipelineCreateInfo->target_info.num_color_targets > 0 && graphicsPipelineCreateInfo->target_info.color_target_descriptions == NULL) {
+diff --git a/src/gpu/d3d12/SDL_gpu_d3d12.c b/src/gpu/d3d12/SDL_gpu_d3d12.c
+index 1a3a0c28fefe19f760cdc6fb97b98752b8e23483..cb1617a4fb5829670750cf36eefc178f1242965b 100644
+--- a/src/gpu/d3d12/SDL_gpu_d3d12.c
++++ b/src/gpu/d3d12/SDL_gpu_d3d12.c
+@@ -3220,11 +3220,18 @@ static SDL_GPUGraphicsPipeline *D3D12_CreateGraphicsPipeline(
+         if (vertShader->stage != SDL_GPU_SHADERSTAGE_VERTEX) {
+             SDL_assert_release(!"CreateGraphicsPipeline was passed a fragment shader for the vertex stage");
+         }
+-        if (fragShader->stage != SDL_GPU_SHADERSTAGE_FRAGMENT) {
++        if (fragShader && fragShader->stage != SDL_GPU_SHADERSTAGE_FRAGMENT) {
+             SDL_assert_release(!"CreateGraphicsPipeline was passed a vertex shader for the fragment stage");
+         }
+     }
+ 
++    // A pipeline without a fragment shader gets no pixel shader bytecode, and the root signature of a fragment shader without resources.
++    D3D12Shader noFragmentShader;
++    if (fragShader == NULL) {
++        SDL_zero(noFragmentShader);
++        fragShader = &noFragmentShader;
++    }
++
+     D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc;
+     SDL_zero(psoDesc);
+     psoDesc.VS.pShaderBytecode = vertShader->bytecode;
+diff --git a/src/gpu/metal/SDL_gpu_metal.m b/src/gpu/metal/SDL_gpu_metal.m
+index eaf292243ab976ebe6572a7883eec39cfc0af122..c42b2bce642550eab3a178710e451ef8c555d24c 100644
+--- a/src/gpu/metal/SDL_gpu_metal.m
++++ b/src/gpu/metal/SDL_gpu_metal.m
+@@ -1116,7 +1116,7 @@ static SDL_GPUGraphicsPipeline *METAL_CreateGraphicsPipeline(
+             if (vertexShader->stage != SDL_GPU_SHADERSTAGE_VERTEX) {
+                 SDL_assert_release(!"CreateGraphicsPipeline was passed a fragment shader for the vertex stage");
+             }
+-            if (fragmentShader->stage != SDL_GPU_SHADERSTAGE_FRAGMENT) {
++            if (fragmentShader && fragmentShader->stage != SDL_GPU_SHADERSTAGE_FRAGMENT) {
+                 SDL_assert_release(!"CreateGraphicsPipeline was passed a vertex shader for the fragment stage");
+             }
+         }
+@@ -1192,7 +1192,7 @@ static SDL_GPUGraphicsPipeline *METAL_CreateGraphicsPipeline(
+         // Shaders
+ 
+         pipelineDescriptor.vertexFunction = vertexShader->function;
+-        pipelineDescriptor.fragmentFunction = fragmentShader->function;
++        pipelineDescriptor.fragmentFunction = fragmentShader ? fragmentShader->function : nil;
+ 
+         // Vertex Descriptor
+ 
+@@ -1238,10 +1238,12 @@ static SDL_GPUGraphicsPipeline *METAL_CreateGraphicsPipeline(
+         result->header.num_vertex_uniform_buffers = vertexShader->numUniformBuffers;
+         result->header.num_vertex_storage_buffers = vertexShader->numStorageBuffers;
+         result->header.num_vertex_storage_textures = vertexShader->numStorageTextures;
+-        result->header.num_fragment_samplers = fragmentShader->numSamplers;
+-        result->header.num_fragment_uniform_buffers = fragmentShader->numUniformBuffers;
+-        result->header.num_fragment_storage_buffers = fragmentShader->numStorageBuffers;
+-        result->header.num_fragment_storage_textures = fragmentShader->numStorageTextures;
++        if (fragmentShader) {
++            result->header.num_fragment_samplers = fragmentShader->numSamplers;
++            result->header.num_fragment_uniform_buffers = fragmentShader->numUniformBuffers;
++            result->header.num_fragment_storage_buffers = fragmentShader->numStorageBuffers;
++            result->header.num_fragment_storage_textures = fragmentShader->numStorageTextures;
++        }
+         return (SDL_GPUGraphicsPipeline *)result;
+     }
+ }
+diff --git a/src/gpu/vulkan/SDL_gpu_vulkan.c b/src/gpu/vulkan/SDL_gpu_vulkan.c
+index 597ad76bace0e5359e6c3f7f2fc00fee7983ebcd..7c11bdffd47a2109799a87a2a7cf74341e99a9fc 100644
+--- a/src/gpu/vulkan/SDL_gpu_vulkan.c
++++ b/src/gpu/vulkan/SDL_gpu_vulkan.c
+@@ -3249,7 +3249,9 @@ static void VULKAN_INTERNAL_DestroyGraphicsPipeline(
+         NULL);
+ 
+     (void)SDL_AtomicDecRef(&graphicsPipeline->vertexShader->referenceCount);
+-    (void)SDL_AtomicDecRef(&graphicsPipeline->fragmentShader->referenceCount);
++    if (graphicsPipeline->fragmentShader) {
++        (void)SDL_AtomicDecRef(&graphicsPipeline->fragmentShader->referenceCount);
++    }
+ 
+     SDL_free(graphicsPipeline);
+ }
+@@ -3993,6 +3995,13 @@ static VulkanGraphicsPipelineResourceLayout *VULKAN_INTERNAL_FetchGraphicsPipeli
+     SDL_zero(key);
+     VulkanGraphicsPipelineResourceLayout *pipelineResourceLayout = NULL;
+ 
++    // A pipeline without a fragment shader has the layout of a fragment shader without resources.
++    VulkanShader noFragmentShader;
++    if (fragmentShader == NULL) {
++        SDL_zero(noFragmentShader);
++        fragmentShader = &noFragmentShader;
++    }
++
+     key.vertexSamplerCount = vertexShader->numSamplers;
+     key.vertexStorageTextureCount = vertexShader->numStorageTextures;
+     key.vertexStorageBufferCount = vertexShader->numStorageBuffers;
+@@ -6407,21 +6416,23 @@ static SDL_GPUGraphicsPipeline *VULKAN_CreateGraphicsPipeline(
+     shaderStageCreateInfos[0].pSpecializationInfo = NULL;
+ 
+     graphicsPipeline->fragmentShader = (VulkanShader *)createinfo->fragment_shader;
+-    SDL_AtomicIncRef(&graphicsPipeline->fragmentShader->referenceCount);
++    if (graphicsPipeline->fragmentShader) {
++        SDL_AtomicIncRef(&graphicsPipeline->fragmentShader->referenceCount);
+ 
+-    shaderStageCreateInfos[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+-    shaderStageCreateInfos[1].pNext = NULL;
+-    shaderStageCreateInfos[1].flags = 0;
+-    shaderStageCreateInfos[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+-    shaderStageCreateInfos[1].module = graphicsPipeline->fragmentShader->shaderModule;
+-    shaderStageCreateInfos[1].pName = graphicsPipeline->fragmentShader->entrypointName;
+-    shaderStageCreateInfos[1].pSpecializationInfo = NULL;
++        shaderStageCreateInfos[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
++        shaderStageCreateInfos[1].pNext = NULL;
++        shaderStageCreateInfos[1].flags = 0;
++        shaderStageCreateInfos[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
++        shaderStageCreateInfos[1].module = graphicsPipeline->fragmentShader->shaderModule;
++        shaderStageCreateInfos[1].pName = graphicsPipeline->fragmentShader->entrypointName;
++        shaderStageCreateInfos[1].pSpecializationInfo = NULL;
++    }
+ 
+     if (renderer->debugMode) {
+         if (graphicsPipeline->vertexShader->stage != SDL_GPU_SHADERSTAGE_VERTEX) {
+             SDL_assert_release(!"CreateGraphicsPipeline was passed a fragment shader for the vertex stage");
+         }
+-        if (graphicsPipeline->fragmentShader->stage != SDL_GPU_SHADERSTAGE_FRAGMENT) {
++        if (graphicsPipeline->fragmentShader && graphicsPipeline->fragmentShader->stage != SDL_GPU_SHADERSTAGE_FRAGMENT) {
+             SDL_assert_release(!"CreateGraphicsPipeline was passed a vertex shader for the fragment stage");
+         }
+     }
+@@ -6602,7 +6613,7 @@ static SDL_GPUGraphicsPipeline *VULKAN_CreateGraphicsPipeline(
+     vkPipelineCreateInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+     vkPipelineCreateInfo.pNext = NULL;
+     vkPipelineCreateInfo.flags = 0;
+-    vkPipelineCreateInfo.stageCount = 2;
++    vkPipelineCreateInfo.stageCount = graphicsPipeline->fragmentShader ? 2 : 1;
+     vkPipelineCreateInfo.pStages = shaderStageCreateInfos;
+     vkPipelineCreateInfo.pVertexInputState = &vertexInputStateCreateInfo;
+     vkPipelineCreateInfo.pInputAssemblyState = &inputAssemblyStateCreateInfo;
+diff --git a/src/gpu/webgpu/SDL_gpu_webgpu.c b/src/gpu/webgpu/SDL_gpu_webgpu.c
+index 1f95de98f2290727939417ac4859812440e54fa7..cc9300bb41f335428cb801e750ddde55f27b357a 100644
+--- a/src/gpu/webgpu/SDL_gpu_webgpu.c
++++ b/src/gpu/webgpu/SDL_gpu_webgpu.c
+@@ -3975,6 +3975,16 @@ static SDL_GPUGraphicsPipeline *WEBGPU_CreateGraphicsPipeline(SDL_GPURenderer *d
+     WebGPUShader *vertexShader = (WebGPUShader *)createInfo->vertex_shader;
+     WebGPUShader *fragmentShader = (WebGPUShader *)createInfo->fragment_shader;
+ 
++    // A pipeline without a fragment shader has no fragment state, and the bind group layouts of a fragment shader without resources.
++    WebGPUShaderBindGroupLayouts *noFragmentBindGroupLayouts = NULL;
++    WebGPUShaderBindGroupLayouts *fragmentBindGroupLayouts;
++    if (fragmentShader) {
++        fragmentBindGroupLayouts = fragmentShader->bindGroupLayouts;
++    } else {
++        noFragmentBindGroupLayouts = WEBGPU_INTERNAL_GenerateBindGroupLayoutsForShader("", 0, (WebGPURenderer *)driverData, WGPUShaderStage_Fragment);
++        fragmentBindGroupLayouts = noFragmentBindGroupLayouts;
++    }
++
+     // WebGPU rejects a non-zero depth bias on point and line topologies, which the native backends accept.
+     bool isTriangleTopology = createInfo->primitive_type == SDL_GPU_PRIMITIVETYPE_TRIANGLELIST || createInfo->primitive_type == SDL_GPU_PRIMITIVETYPE_TRIANGLESTRIP;
+     bool depthBiasEnabled = createInfo->rasterizer_state.enable_depth_bias && isTriangleTopology;
+@@ -4044,8 +4054,8 @@ static SDL_GPUGraphicsPipeline *WEBGPU_CreateGraphicsPipeline(SDL_GPURenderer *d
+         .constants = NULL,
+         .targets = colorTargets,
+         .targetCount = createInfo->target_info.num_color_targets,
+-        .entryPoint = { fragmentShader->entrypoint, SDL_strlen(fragmentShader->entrypoint) },
+-        .module = fragmentShader->shader,
++        .entryPoint = fragmentShader ? (WGPUStringView){ fragmentShader->entrypoint, SDL_strlen(fragmentShader->entrypoint) } : (WGPUStringView){ NULL, 0 },
++        .module = fragmentShader ? fragmentShader->shader : NULL,
+     };
+ 
+     WGPUVertexBufferLayout *vertexBufferLayouts = SDL_calloc(createInfo->vertex_input_state.num_vertex_buffers, sizeof(WGPUVertexBufferLayout));
+@@ -4119,8 +4129,8 @@ static SDL_GPUGraphicsPipeline *WEBGPU_CreateGraphicsPipeline(SDL_GPURenderer *d
+     WGPUBindGroupLayout *bindGroupLayouts = SDL_calloc(4, sizeof(WGPUBindGroupLayout));
+     bindGroupLayouts[0] = vertexShader->bindGroupLayouts->samplerStorageBindGroupLayout;
+     bindGroupLayouts[1] = vertexShader->bindGroupLayouts->uniformBindGroupLayout;
+-    bindGroupLayouts[2] = fragmentShader->bindGroupLayouts->samplerStorageBindGroupLayout;
+-    bindGroupLayouts[3] = fragmentShader->bindGroupLayouts->uniformBindGroupLayout;
++    bindGroupLayouts[2] = fragmentBindGroupLayouts->samplerStorageBindGroupLayout;
++    bindGroupLayouts[3] = fragmentBindGroupLayouts->uniformBindGroupLayout;
+ 
+     WGPUPipelineLayoutDescriptor pipelineLayoutDesc = {
+         .bindGroupLayoutCount = 4,
+@@ -4135,7 +4145,7 @@ static SDL_GPUGraphicsPipeline *WEBGPU_CreateGraphicsPipeline(SDL_GPURenderer *d
+ 
+     pipelineDesc.label = debugName != NULL ? (WGPUStringView){ debugName, SDL_strlen(debugName) } : (WGPUStringView){ NULL, 0 };
+     pipelineDesc.vertex = vertexState;
+-    pipelineDesc.fragment = &fragmentState;
++    pipelineDesc.fragment = fragmentShader ? &fragmentState : NULL;
+     pipelineDesc.multisample = multisampleState;
+     pipelineDesc.depthStencil = createInfo->target_info.has_depth_stencil_target ? &depthStencilState : NULL;
+     pipelineDesc.primitive = primitiveState;
+@@ -4147,11 +4157,18 @@ static SDL_GPUGraphicsPipeline *WEBGPU_CreateGraphicsPipeline(SDL_GPURenderer *d
+     wgpuPipelineLayoutRelease(pipelineLayout);
+ 
+     pipeline->vertexBindGroupLayouts = *vertexShader->bindGroupLayouts;
+-    pipeline->fragmentBindGroupLayouts = *fragmentShader->bindGroupLayouts;
++    pipeline->fragmentBindGroupLayouts = *fragmentBindGroupLayouts;
+     for (int i = 0; i < 4; i++) {
+         wgpuBindGroupLayoutAddRef(bindGroupLayouts[i]);
+     }
+ 
++    // The pipeline now holds its own references, as it does to a fragment shader's layouts.
++    if (noFragmentBindGroupLayouts) {
++        wgpuBindGroupLayoutRelease(noFragmentBindGroupLayouts->samplerStorageBindGroupLayout);
++        wgpuBindGroupLayoutRelease(noFragmentBindGroupLayouts->uniformBindGroupLayout);
++        SDL_free(noFragmentBindGroupLayouts);
++    }
++
+     for (int i = 0; i < createInfo->vertex_input_state.num_vertex_buffers; i++) {
+         SDL_free((void *)vertexBufferLayouts[i].attributes);
+     }
