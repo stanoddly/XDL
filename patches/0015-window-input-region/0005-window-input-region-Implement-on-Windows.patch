@@ -9,16 +9,16 @@ Subject: [PATCH] window-input-region: Implement on Windows
  VisualC/SDL/SDL.vcxproj                    |   2 +
  VisualC/SDL/SDL.vcxproj.filters            |   6 +
  src/video/windows/SDL_windowsevents.c      |  13 +
- src/video/windows/SDL_windowsinputregion.c | 456 +++++++++++++++++++++
+ src/video/windows/SDL_windowsinputregion.c | 492 +++++++++++++++++++++
  src/video/windows/SDL_windowsinputregion.h |  36 ++
  src/video/windows/SDL_windowsmousehook.c   |   5 +
  src/video/windows/SDL_windowsshape.c       |   4 +-
  src/video/windows/SDL_windowsshape.h       |   2 +
- src/video/windows/SDL_windowsvideo.c       |   3 +
- src/video/windows/SDL_windowsvideo.h       |   1 +
+ src/video/windows/SDL_windowsvideo.c       |   4 +
+ src/video/windows/SDL_windowsvideo.h       |   2 +
  src/video/windows/SDL_windowswindow.c      |   5 +
  src/video/windows/SDL_windowswindow.h      |   2 +-
- 14 files changed, 536 insertions(+), 3 deletions(-)
+ 14 files changed, 574 insertions(+), 3 deletions(-)
  create mode 100644 src/video/windows/SDL_windowsinputregion.c
  create mode 100644 src/video/windows/SDL_windowsinputregion.h
 
@@ -153,10 +153,10 @@ index 9bf8089394492b9b3d8c607ff754933d9b1bdcdd..83894ed2198720c318cc9bda11ce19f9
         You won't get a KEYUP until both are released, and that keyup will only be for the second
 diff --git a/src/video/windows/SDL_windowsinputregion.c b/src/video/windows/SDL_windowsinputregion.c
 new file mode 100644
-index 0000000000000000000000000000000000000000..42d90b3efbca905a9fa52dceb867497187a9356a
+index 0000000000000000000000000000000000000000..fcc4aa3122bd2b21f7b0888a15180b5277d8f416
 --- /dev/null
 +++ b/src/video/windows/SDL_windowsinputregion.c
-@@ -0,0 +1,456 @@
+@@ -0,0 +1,492 @@
 +/*
 +  Simple DirectMedia Layer
 +  Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
@@ -222,6 +222,10 @@ index 0000000000000000000000000000000000000000..42d90b3efbca905a9fa52dceb8674971
 +// The z-order can change during the walk up from a window, so the walk is bounded.
 +#define MAX_WINDOWS_ABOVE 4096
 +
++#ifndef DWMWA_CLOAKED
++#define DWMWA_CLOAKED 14
++#endif
++
 +// Guarded by the mouse hook's lock. Only the main thread changes windows and num_windows, so it reads them without the lock.
 +static struct
 +{
@@ -230,9 +234,10 @@ index 0000000000000000000000000000000000000000..42d90b3efbca905a9fa52dceb8674971
 +    QueuedButton *queue;
 +    int num_queued;
 +    int queue_capacity;
++    HRESULT (WINAPI *DwmGetWindowAttribute)(HWND hwnd, DWORD dwAttribute, PVOID pvAttribute, DWORD cbAttribute);
 +} input_region;
 +
-+// Call it with the lock held.
++// Call it with the lock held, or from the main thread.
 +static RegionWindow *FindWindowByID(SDL_WindowID window_id)
 +{
 +    int i;
@@ -313,6 +318,15 @@ index 0000000000000000000000000000000000000000..42d90b3efbca905a9fa52dceb8674971
 +    return false;
 +}
 +
++/* Whether the window manager hides the window, as it does a window on another virtual desktop. Such a window stays visible to
++   IsWindowVisible(). */
++static bool IsCloaked(HWND hwnd, HRESULT (WINAPI *get_attribute)(HWND, DWORD, PVOID, DWORD))
++{
++    DWORD cloaked = 0;
++
++    return get_attribute && SUCCEEDED(get_attribute(hwnd, DWMWA_CLOAKED, &cloaked, sizeof(cloaked))) && cloaked != 0;
++}
++
 +// Call it with the lock held.
 +static bool QueueButton(const RegionWindow *window, bool down, float x, float y)
 +{
@@ -350,18 +364,32 @@ index 0000000000000000000000000000000000000000..42d90b3efbca905a9fa52dceb8674971
 +{
 +    RegionWindow *window;
 +    HWND hwnd = NULL;
++    HRESULT (WINAPI *get_attribute)(HWND, DWORD, PVOID, DWORD);
 +    bool blocked = false;
 +    float x = 0.0f, y = 0.0f;
++    int i;
 +
 +    WIN_LockMouseHook();
++    /* A new press means the hook missed the last release, as it does while another desktop, such as the secure desktop, has the input. The
++       release is reported first, so SDL takes the new press. */
++    for (i = 0; i < input_region.num_windows; ++i) {
++        RegionWindow *stale = &input_region.windows[i];
++        if (stale->pressed) {
++            float stale_x, stale_y;
++            GetWindowPoint(stale, pt, &stale_x, &stale_y);
++            QueueButton(stale, false, stale_x, stale_y);
++            stale->pressed = false;
++        }
++    }
 +    window = FindWindowAt(pt, &x, &y);
 +    if (window) {
 +        hwnd = window->hwnd;
 +    }
++    get_attribute = input_region.DwmGetWindowAttribute;
 +    WIN_UnlockMouseHook();
 +
 +    // Hit testing runs outside the lock, so the main thread never waits for it.
-+    if (!hwnd || IsCoveredAt(hwnd, pt)) {
++    if (!hwnd || IsCloaked(hwnd, get_attribute) || IsCoveredAt(hwnd, pt)) {
 +        return false;
 +    }
 +
@@ -472,6 +500,7 @@ index 0000000000000000000000000000000000000000..42d90b3efbca905a9fa52dceb8674971
 +    RECT box;
 +    POINT origin;
 +    float scale_x, scale_y;
++    bool added = false;
 +    bool result = true;
 +
 +    /* The window lets all mouse input through, and the hook takes the presses in the region. If the hook can't be installed, the window still
@@ -492,11 +521,13 @@ index 0000000000000000000000000000000000000000..42d90b3efbca905a9fa52dceb8674971
 +        }
 +        WIN_LockMouseHook();
 +        entry = AddWindow(window);
++        input_region.DwmGetWindowAttribute = _this->internal->DwmGetWindowAttribute;
 +        WIN_UnlockMouseHook();
 +        if (!entry) {
 +            WIN_ReleaseMouseHook();
 +            return false;
 +        }
++        added = true;
 +    }
 +
 +    GetPlacement(window, &origin, &scale_x, &scale_y);
@@ -523,6 +554,11 @@ index 0000000000000000000000000000000000000000..42d90b3efbca905a9fa52dceb8674971
 +    entry->scale_x = scale_x;
 +    entry->scale_y = scale_y;
 +    WIN_UnlockMouseHook();
++
++    // A window whose first region failed has no region, so it leaves the hook.
++    if (!result && added) {
++        WIN_RemoveWindowInputRegion(window);
++    }
 +    return result;
 +}
 +
@@ -713,7 +749,7 @@ index 926cda04144424640103f76275b6a787d1506dce..80ec62d9914c814e4304bc264891cfab
  
  #endif // SDL_windowsshape_h_
 diff --git a/src/video/windows/SDL_windowsvideo.c b/src/video/windows/SDL_windowsvideo.c
-index e0775b080b626569690c9422bbf0513bb9a06aff..130a043cbcf365bc188328c3c8d42836188d884a 100644
+index e0775b080b626569690c9422bbf0513bb9a06aff..514b1ba39989d0d1d37dc1d8a7008311e33b9024 100644
 --- a/src/video/windows/SDL_windowsvideo.c
 +++ b/src/video/windows/SDL_windowsvideo.c
 @@ -32,6 +32,7 @@
@@ -732,7 +768,15 @@ index e0775b080b626569690c9422bbf0513bb9a06aff..130a043cbcf365bc188328c3c8d42836
          data->AreDpiAwarenessContextsEqual = (BOOL (WINAPI *)(DPI_AWARENESS_CONTEXT, DPI_AWARENESS_CONTEXT))SDL_LoadFunction(data->userDLL, "AreDpiAwarenessContextsEqual");
          data->IsValidDpiAwarenessContext = (BOOL (WINAPI *)(DPI_AWARENESS_CONTEXT))SDL_LoadFunction(data->userDLL, "IsValidDpiAwarenessContext");
          data->GetDisplayConfigBufferSizes = (LONG (WINAPI *)(UINT32,UINT32 *,UINT32 *))SDL_LoadFunction(data->userDLL, "GetDisplayConfigBufferSizes");
-@@ -392,6 +394,7 @@ static SDL_VideoDevice *WIN_CreateDevice(void)
+@@ -301,6 +303,7 @@ static SDL_VideoDevice *WIN_CreateDevice(void)
+         data->DwmFlush = (HRESULT (WINAPI *)(void))SDL_LoadFunction(data->dwmapiDLL, "DwmFlush");
+         data->DwmEnableBlurBehindWindow = (HRESULT (WINAPI *)(HWND hwnd, const DWM_BLURBEHIND *pBlurBehind))SDL_LoadFunction(data->dwmapiDLL, "DwmEnableBlurBehindWindow");
+         data->DwmSetWindowAttribute = (HRESULT (WINAPI *)(HWND hwnd, DWORD dwAttribute, LPCVOID pvAttribute, DWORD cbAttribute))SDL_LoadFunction(data->dwmapiDLL, "DwmSetWindowAttribute");
++        data->DwmGetWindowAttribute = (HRESULT (WINAPI *)(HWND hwnd, DWORD dwAttribute, PVOID pvAttribute, DWORD cbAttribute))SDL_LoadFunction(data->dwmapiDLL, "DwmGetWindowAttribute");
+         /* *INDENT-ON* */ // clang-format on
+     } else {
+         SDL_ClearError();
+@@ -392,6 +395,7 @@ static SDL_VideoDevice *WIN_CreateDevice(void)
      device->SetWindowFocusable = WIN_SetWindowFocusable;
      device->UpdateWindowShape = WIN_UpdateWindowShape;
      device->SetWindowMousePassthroughEvents = WIN_SetWindowMousePassthroughEvents;
@@ -741,10 +785,18 @@ index e0775b080b626569690c9422bbf0513bb9a06aff..130a043cbcf365bc188328c3c8d42836
  
  #ifdef SDL_VIDEO_OPENGL_WGL
 diff --git a/src/video/windows/SDL_windowsvideo.h b/src/video/windows/SDL_windowsvideo.h
-index 083286a9802cb019b6f040ac84b3c2d4c9865a9e..863e55e089a8ac31a82a76f34728a01e087f8e0a 100644
+index 083286a9802cb019b6f040ac84b3c2d4c9865a9e..ef1f56da0b85cf5d34154f1c54504c4a11a39fa3 100644
 --- a/src/video/windows/SDL_windowsvideo.h
 +++ b/src/video/windows/SDL_windowsvideo.h
-@@ -575,6 +575,7 @@ struct SDL_VideoData
+@@ -550,6 +550,7 @@ struct SDL_VideoData
+     HRESULT (WINAPI *DwmFlush)(void);
+     HRESULT (WINAPI *DwmEnableBlurBehindWindow)(HWND hwnd, const DWM_BLURBEHIND *pBlurBehind);
+     HRESULT (WINAPI *DwmSetWindowAttribute)(HWND hwnd, DWORD dwAttribute, LPCVOID pvAttribute, DWORD cbAttribute);
++    HRESULT (WINAPI *DwmGetWindowAttribute)(HWND hwnd, DWORD dwAttribute, PVOID pvAttribute, DWORD cbAttribute);
+     /* *INDENT-ON* */ // clang-format on
+ 
+     // DirectComposition functions
+@@ -575,6 +576,7 @@ struct SDL_VideoData
      BOOL (WINAPI *AdjustWindowRectExForDpi)( LPRECT, DWORD, BOOL, DWORD, UINT );
      UINT (WINAPI *GetDpiForWindow)( HWND );
      BOOL (WINAPI *PhysicalToLogicalPointForPerMonitorDPI)( HWND, LPPOINT );

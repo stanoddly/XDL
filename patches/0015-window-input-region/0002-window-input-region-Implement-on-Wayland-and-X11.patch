@@ -4,20 +4,21 @@ Date: Mon, 9 Nov 2026 22:01:24 +0100
 Subject: [PATCH] window-input-region: Implement on Wayland and X11
 
 ---
- src/video/wayland/SDL_waylandshape.c | 36 ++++++++++++++++++++++
- src/video/wayland/SDL_waylandshape.h |  1 +
- src/video/wayland/SDL_waylandvideo.c |  1 +
- src/video/x11/SDL_x11shape.c         | 46 ++++++++++++++++++++++++++++
- src/video/x11/SDL_x11shape.h         |  1 +
- src/video/x11/SDL_x11sym.h           |  2 ++
- src/video/x11/SDL_x11video.c         |  1 +
- 7 files changed, 88 insertions(+)
+ src/video/wayland/SDL_waylandshape.c  | 34 ++++++++++++++++++++
+ src/video/wayland/SDL_waylandshape.h  |  1 +
+ src/video/wayland/SDL_waylandvideo.c  |  1 +
+ src/video/wayland/SDL_waylandwindow.c |  4 +++
+ src/video/x11/SDL_x11shape.c          | 46 +++++++++++++++++++++++++++
+ src/video/x11/SDL_x11shape.h          |  1 +
+ src/video/x11/SDL_x11sym.h            |  2 ++
+ src/video/x11/SDL_x11video.c          |  1 +
+ 8 files changed, 90 insertions(+)
 
 diff --git a/src/video/wayland/SDL_waylandshape.c b/src/video/wayland/SDL_waylandshape.c
-index c5cc01ee8c3ce70de69f1814fdf890ea66efbefe..2f6cfdcf7380574436b3b07e7976a0f533335859 100644
+index c5cc01ee8c3ce70de69f1814fdf890ea66efbefe..eca5ded92bb12f9b707a87edddd2431ac29532fe 100644
 --- a/src/video/wayland/SDL_waylandshape.c
 +++ b/src/video/wayland/SDL_waylandshape.c
-@@ -88,4 +88,40 @@ bool Wayland_UpdateWindowShape(SDL_VideoDevice *_this, SDL_Window *window, SDL_S
+@@ -88,4 +88,38 @@ bool Wayland_UpdateWindowShape(SDL_VideoDevice *_this, SDL_Window *window, SDL_S
      return true;
  }
  
@@ -26,17 +27,13 @@ index c5cc01ee8c3ce70de69f1814fdf890ea66efbefe..2f6cfdcf7380574436b3b07e7976a0f5
 +    SDL_VideoData *video = _this->internal;
 +    SDL_WindowData *data = window->internal;
 +    struct wl_region *region;
-+    float scale_x = 1.0f, scale_y = 1.0f;
++    // The pointer scale is set when the window is first configured. SDL applies the region again when the window is resized.
++    const double scale_x = data->pointer_scale.x > 0.0 ? data->pointer_scale.x : 1.0;
++    const double scale_y = data->pointer_scale.y > 0.0 ? data->pointer_scale.y : 1.0;
 +    int i;
 +
 +    if (!data->surface) {
 +        return SDL_SetError("Window has no surface");
-+    }
-+
-+    // A region is in surface coordinates, which differ from window coordinates when scaling to the display or emulating a fullscreen mode.
-+    if (window->w > 0 && window->h > 0) {
-+        scale_x = (float)data->current.logical_width / (float)window->w;
-+        scale_y = (float)data->current.logical_height / (float)window->h;
 +    }
 +
 +    // An empty region lets all input through. The compositor applies the region with the surface's next commit, when the window presents a frame.
@@ -44,11 +41,13 @@ index c5cc01ee8c3ce70de69f1814fdf890ea66efbefe..2f6cfdcf7380574436b3b07e7976a0f5
 +    for (i = 0; i < count; ++i) {
 +        const SDL_Rect *rect = &rects[i];
 +        if (rect->w > 0 && rect->h > 0) {
-+            // Rounded outward, so a scaled rectangle still covers every point of the original.
-+            const int x0 = (int)SDL_floorf((float)rect->x * scale_x);
-+            const int y0 = (int)SDL_floorf((float)rect->y * scale_y);
-+            const int x1 = (int)SDL_ceilf((float)(rect->x + rect->w) * scale_x);
-+            const int y1 = (int)SDL_ceilf((float)(rect->y + rect->h) * scale_y);
++            /* A region is in surface coordinates, which differ from window coordinates when scaling to the display or emulating a fullscreen
++               mode. The pointer scale maps surface coordinates to the window coordinates mouse events have. Rounded outward, so a scaled
++               rectangle still covers every point of the original. */
++            const int x0 = (int)SDL_floor(rect->x / scale_x);
++            const int y0 = (int)SDL_floor(rect->y / scale_y);
++            const int x1 = (int)SDL_ceil((rect->x + rect->w) / scale_x);
++            const int y1 = (int)SDL_ceil((rect->y + rect->h) / scale_y);
 +            wl_region_add(region, x0, y0, x1 - x0, y1 - y0);
 +        }
 +    }
@@ -81,6 +80,21 @@ index e94f42abcef2b70f9f419c8fe306e02c555b8dc8..be001e149a54a553a59bae370f83afd3
      device->FlashWindow = Wayland_FlashWindow;
  #ifdef SDL_USE_LIBDBUS
      device->ApplyWindowProgress = DBUS_ApplyWindowProgress;
+diff --git a/src/video/wayland/SDL_waylandwindow.c b/src/video/wayland/SDL_waylandwindow.c
+index 11877c97f3be55fbb620688f475295d140810465..76aed36c3fbc03f552219d1a4e58185972f549ae 100644
+--- a/src/video/wayland/SDL_waylandwindow.c
++++ b/src/video/wayland/SDL_waylandwindow.c
+@@ -432,6 +432,10 @@ static void ConfigureWindowGeometry(SDL_Window *window)
+         if (shape) {
+             Wayland_UpdateWindowShape(SDL_GetVideoDevice(), window, shape);
+         }
++        // The same holds for an input region.
++        if (window->has_input_region) {
++            Wayland_SetWindowInputRegion(SDL_GetVideoDevice(), window, window->input_region_rects, window->input_region_count);
++        }
+ 
+         // Ensure that child popup windows are still in bounds.
+         for (SDL_Window *child = window->first_child; child; child = child->next_sibling) {
 diff --git a/src/video/x11/SDL_x11shape.c b/src/video/x11/SDL_x11shape.c
 index a8fefab2f06edd50d30c04d1b0e0b6f750393f83..9bc871a6e4a80ef3e1265779533069731b71d2b1 100644
 --- a/src/video/x11/SDL_x11shape.c

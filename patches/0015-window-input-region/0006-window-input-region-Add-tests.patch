@@ -5,9 +5,9 @@ Subject: [PATCH] window-input-region: Add tests
 
 ---
  test/CMakeLists.txt         |   1 +
- test/testautomation_video.c |  66 ++++++++++++++
- test/testinputregion.c      | 168 ++++++++++++++++++++++++++++++++++++
- 3 files changed, 235 insertions(+)
+ test/testautomation_video.c |  70 ++++++++++++++
+ test/testinputregion.c      | 178 ++++++++++++++++++++++++++++++++++++
+ 3 files changed, 249 insertions(+)
  create mode 100644 test/testinputregion.c
 
 diff --git a/test/CMakeLists.txt b/test/CMakeLists.txt
@@ -23,16 +23,16 @@ index ec82f0d7e3bab1d035149eeb69bbd099e66cc6e4..7c2988c6970c1833d13944d4349cd13a
  add_sdl_test_executable(testdraw SOURCES testdraw.c)
  add_sdl_test_executable(testdrawchessboard SOURCES testdrawchessboard.c)
 diff --git a/test/testautomation_video.c b/test/testautomation_video.c
-index e5a7cc6f69a4d0409aac308dde6790d90aab0a36..af58db3649926b6fc7bf68d20a8d5fbaa5769111 100644
+index e5a7cc6f69a4d0409aac308dde6790d90aab0a36..da66e3a5ae9abf813cc6af8461d52441e1d78aea 100644
 --- a/test/testautomation_video.c
 +++ b/test/testautomation_video.c
-@@ -2658,6 +2658,67 @@ static int SDLCALL video_setWindowMousePassthroughEvents(void *arg)
+@@ -2658,6 +2658,71 @@ static int SDLCALL video_setWindowMousePassthroughEvents(void *arg)
      return TEST_COMPLETED;
  }
  
 +/**
 + * Tests XDL_SetWindowInputRegion: invalid arguments, a window that isn't transparent, setting and emptying the region of a transparent one, and
-+ * that a window can't have both an input region and mouse passthrough events.
++ * that a window with a region, even an empty one, can't have mouse passthrough events or a shape.
 + */
 +static int SDLCALL video_setWindowInputRegion(void *arg)
 +{
@@ -81,8 +81,12 @@ index e5a7cc6f69a4d0409aac308dde6790d90aab0a36..af58db3649926b6fc7bf68d20a8d5fba
 +        SDLTest_AssertCheck(result, "Result for one rectangle is %d, expected 1 (%s)", result, result ? "" : SDL_GetError());
 +        result = XDL_SetWindowMousePassthroughEvents(window, true);
 +        SDLTest_AssertCheck(!result, "Enabling mouse passthrough events with a region returns %d, expected 0", result);
++        result = SDL_SetWindowShape(window, NULL);
++        SDLTest_AssertCheck(!result, "Setting a shape with a region returns %d, expected 0", result);
 +        result = XDL_SetWindowInputRegion(window, NULL, 0);
 +        SDLTest_AssertCheck(result, "Result for emptying the region is %d, expected 1 (%s)", result, result ? "" : SDL_GetError());
++        result = XDL_SetWindowMousePassthroughEvents(window, true);
++        SDLTest_AssertCheck(!result, "Enabling mouse passthrough events with an empty region returns %d, expected 0", result);
 +    }
 +
 +    /* The window is destroyed while it has a region. */
@@ -94,7 +98,7 @@ index e5a7cc6f69a4d0409aac308dde6790d90aab0a36..af58db3649926b6fc7bf68d20a8d5fba
  /* ================= Test References ================== */
  
  /* Video test cases */
-@@ -2755,6 +2816,10 @@ static const SDLTest_TestCaseReference videoTestSetWindowMousePassthroughEvents
+@@ -2755,6 +2820,10 @@ static const SDLTest_TestCaseReference videoTestSetWindowMousePassthroughEvents
      video_setWindowMousePassthroughEvents, "video_setWindowMousePassthroughEvents", "Checks enabling and disabling mouse passthrough events", TEST_ENABLED
  };
  
@@ -105,7 +109,7 @@ index e5a7cc6f69a4d0409aac308dde6790d90aab0a36..af58db3649926b6fc7bf68d20a8d5fba
  /* Sequence of Video test cases */
  static const SDLTest_TestCaseReference *videoTests[] = {
      &videoTestEnableDisableScreensaver,
-@@ -2781,6 +2846,7 @@ static const SDLTest_TestCaseReference *videoTests[] = {
+@@ -2781,6 +2850,7 @@ static const SDLTest_TestCaseReference *videoTests[] = {
      &videoTestGetWindowSurface,
      &videoTestRaiseWindow,
      &videoTestSetWindowMousePassthroughEvents,
@@ -115,10 +119,10 @@ index e5a7cc6f69a4d0409aac308dde6790d90aab0a36..af58db3649926b6fc7bf68d20a8d5fba
  
 diff --git a/test/testinputregion.c b/test/testinputregion.c
 new file mode 100644
-index 0000000000000000000000000000000000000000..83690bbaf955b56621ffd9535211cb957ca88408
+index 0000000000000000000000000000000000000000..44e98259e9d27eac2b220bbbe54cb8ab2906f88a
 --- /dev/null
 +++ b/test/testinputregion.c
-@@ -0,0 +1,168 @@
+@@ -0,0 +1,178 @@
 +/*
 +  Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
 +
@@ -132,8 +136,8 @@ index 0000000000000000000000000000000000000000..83690bbaf955b56621ffd9535211cb95
 +*/
 +
 +/* An always-on-top transparent window that draws two squares and takes mouse input only inside them, with XDL_SetWindowInputRegion(). Mouse
-+   input anywhere else reaches the windows beneath it. It logs each mouse event, and a square lights up while a button is held in it. It uses
-+   the software renderer.
++   input anywhere else reaches the windows beneath it. It logs each mouse event, and a square lights up while a button pressed in it is held.
++   It uses the software renderer.
 +
 +   --move  slides the squares across the window, setting the region again every frame.
 +   --fullscreen  covers the display instead, like a desktop overlay.
@@ -195,7 +199,8 @@ index 0000000000000000000000000000000000000000..83690bbaf955b56621ffd9535211cb95
 +    SDL_Rect squares[NUM_SQUARES];
 +    bool move = false;
 +    bool done = false;
-+    bool held = false;
++    // The square a held button was pressed in, or -1.
++    int held = -1;
 +    Uint64 deadline = 0;
 +    Uint64 last = 0;
 +    float offset = 0.0f;
@@ -232,6 +237,7 @@ index 0000000000000000000000000000000000000000..83690bbaf955b56621ffd9535211cb95
 +        return 1;
 +    }
 +    SDL_Log("Window %" SDL_PRIu32 " takes mouse input only inside its squares", SDL_GetWindowID(window));
++    PlaceSquares(window, offset, squares);
 +
 +    while (!done) {
 +        SDL_Event event;
@@ -247,8 +253,16 @@ index 0000000000000000000000000000000000000000..83690bbaf955b56621ffd9535211cb95
 +                LogEvent(&event);
 +                if (event.type == SDL_EVENT_QUIT || (event.type == SDL_EVENT_KEY_DOWN && event.key.key == SDLK_ESCAPE)) {
 +                    done = true;
-+                } else if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN || event.type == SDL_EVENT_MOUSE_BUTTON_UP) {
-+                    held = event.button.down;
++                } else if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
++                    const SDL_Point point = { (int)event.button.x, (int)event.button.y };
++                    held = -1;
++                    for (i = 0; i < NUM_SQUARES; ++i) {
++                        if (SDL_PointInRect(&point, &squares[i])) {
++                            held = i;
++                        }
++                    }
++                } else if (event.type == SDL_EVENT_MOUSE_BUTTON_UP) {
++                    held = -1;
 +                }
 +            } while (SDL_PollEvent(&event));
 +        }
@@ -272,7 +286,7 @@ index 0000000000000000000000000000000000000000..83690bbaf955b56621ffd9535211cb95
 +        SDL_RenderClear(renderer);
 +        for (i = 0; i < NUM_SQUARES; ++i) {
 +            const SDL_FRect rect = { (float)squares[i].x, (float)squares[i].y, (float)squares[i].w, (float)squares[i].h };
-+            if (held) {
++            if (i == held) {
 +                SDL_SetRenderDrawColor(renderer, 255, 160, 0, SDL_ALPHA_OPAQUE);
 +            } else {
 +                SDL_SetRenderDrawColor(renderer, 64, 64, 160, SDL_ALPHA_OPAQUE);
