@@ -1,0 +1,71 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: botoddly <250804054+botoddly@users.noreply.github.com>
+Date: Mon, 9 Nov 2026 14:49:57 +0100
+Subject: [PATCH] gpu-storage-buffer-usage: Check a storage buffer's usage when
+ it is bound in debug mode
+
+---
+ src/gpu/SDL_gpu.c | 29 ++++++++++++++++++++++++++++-
+ 1 file changed, 28 insertions(+), 1 deletion(-)
+
+diff --git a/src/gpu/SDL_gpu.c b/src/gpu/SDL_gpu.c
+index 0f5d3f12e027f2e6b9e55d44c5d8ed495d83774a..7959aacefbed76eeb8c631a1a65f706fc01f798f 100644
+--- a/src/gpu/SDL_gpu.c
++++ b/src/gpu/SDL_gpu.c
+@@ -2196,6 +2196,13 @@ void SDL_BindGPUVertexStorageBuffers(
+     if (RENDERPASS_DEVICE->debug_mode) {
+         CHECK_RENDERPASS
+ 
++        for (Uint32 i = 0; i < num_bindings; i += 1) {
++            if (!(((BufferCommonHeader *)storage_buffers[i])->usage & SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ)) {
++                SDL_assert_release(!"Storage buffer must be created with GRAPHICS_STORAGE_READ flag");
++                return;
++            }
++        }
++
+         for (Uint32 i = 0; i < num_bindings; i += 1) {
+             ((RenderPass *)render_pass)->vertex_storage_buffer_bound[first_slot + i] = true;
+         }
+@@ -2315,6 +2322,13 @@ void SDL_BindGPUFragmentStorageBuffers(
+     if (RENDERPASS_DEVICE->debug_mode) {
+         CHECK_RENDERPASS
+ 
++        for (Uint32 i = 0; i < num_bindings; i += 1) {
++            if (!(((BufferCommonHeader *)storage_buffers[i])->usage & SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ)) {
++                SDL_assert_release(!"Storage buffer must be created with GRAPHICS_STORAGE_READ flag");
++                return;
++            }
++        }
++
+         for (Uint32 i = 0; i < num_bindings; i += 1) {
+             ((RenderPass *)render_pass)->fragment_storage_buffer_bound[first_slot + i] = true;
+         }
+@@ -2527,7 +2541,13 @@ SDL_GPUComputePass *SDL_BeginGPUComputePass(
+             }
+         }
+ 
+-        // TODO: validate buffer usage?
++        for (Uint32 i = 0; i < num_storage_buffer_bindings; i += 1) {
++            BufferCommonHeader *header = (BufferCommonHeader *)storage_buffer_bindings[i].buffer;
++            if (!(header->usage & SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE)) {
++                SDL_assert_release(!"Storage buffer must be created with COMPUTE_STORAGE_WRITE flag");
++                return NULL;
++            }
++        }
+     }
+ 
+     COMMAND_BUFFER_DEVICE->BeginComputePass(
+@@ -2679,6 +2699,13 @@ void SDL_BindGPUComputeStorageBuffers(
+     if (COMPUTEPASS_DEVICE->debug_mode) {
+         CHECK_COMPUTEPASS
+ 
++        for (Uint32 i = 0; i < num_bindings; i += 1) {
++            if (!(((BufferCommonHeader *)storage_buffers[i])->usage & SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ)) {
++                SDL_assert_release(!"Storage buffer must be created with COMPUTE_STORAGE_READ flag");
++                return;
++            }
++        }
++
+         for (Uint32 i = 0; i < num_bindings; i += 1) {
+             ((ComputePass *)compute_pass)->read_only_storage_buffer_bound[first_slot + i] = true;
+         }

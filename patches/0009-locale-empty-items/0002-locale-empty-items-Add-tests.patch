@@ -1,0 +1,136 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: botoddly <250804054+botoddly@users.noreply.github.com>
+Date: Mon, 9 Nov 2026 14:37:14 +0100
+Subject: [PATCH] locale-empty-items: Add tests
+
+---
+ test/testautomation.c        |  1 +
+ test/testautomation_locale.c | 94 ++++++++++++++++++++++++++++++++++++
+ test/testautomation_suites.h |  1 +
+ 3 files changed, 96 insertions(+)
+ create mode 100644 test/testautomation_locale.c
+
+diff --git a/test/testautomation.c b/test/testautomation.c
+index a2324ff8cc1c732998f1ca00b4018d33f141884c..23a0e9fc9cc8d4ce7d33f828e32aaaf0c65f495d 100644
+--- a/test/testautomation.c
++++ b/test/testautomation.c
+@@ -31,6 +31,7 @@ static SDLTest_TestSuiteReference *testSuites[] = {
+     &intrinsicsTestSuite,
+     &joystickTestSuite,
+     &keyboardTestSuite,
++    &localeTestSuite,
+     &logTestSuite,
+     &mainTestSuite,
+     &mathTestSuite,
+diff --git a/test/testautomation_locale.c b/test/testautomation_locale.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..4ad9bd6c816ed58f968d79476c27c5fbe83a95c2
+--- /dev/null
++++ b/test/testautomation_locale.c
+@@ -0,0 +1,94 @@
++/**
++ * Locale test suite
++ */
++
++#include <SDL3/SDL.h>
++#include <SDL3/SDL_test.h>
++#include "testautomation_suites.h"
++
++/* ================= Test Case Implementation ================== */
++
++typedef struct
++{
++    const char *language;
++    const char *country;
++} ExpectedLocale;
++
++static void checkPreferredLocales(const char *hint, const ExpectedLocale *expected, int expected_count)
++{
++    SDL_Locale **locales;
++    int count = -1;
++    int i;
++
++    SDL_SetHint(SDL_HINT_PREFERRED_LOCALES, hint);
++    locales = SDL_GetPreferredLocales(&count);
++    SDLTest_AssertPass("Call to SDL_GetPreferredLocales() with \"%s\"", hint);
++    SDLTest_AssertCheck(count == expected_count, "Check count for \"%s\", expected: %d, got: %d", hint, expected_count, count);
++
++    if (expected_count == 0) {
++        SDLTest_AssertCheck(locales == NULL, "Check result for \"%s\" is NULL", hint);
++    } else {
++        SDLTest_AssertCheck(locales != NULL, "Check result for \"%s\" is not NULL", hint);
++    }
++
++    if (locales && count == expected_count) {
++        for (i = 0; i < count; i++) {
++            const SDL_Locale *locale = locales[i];
++            SDLTest_AssertCheck(locale != NULL, "Check entry %d for \"%s\" is not NULL", i, hint);
++            if (!locale) {
++                continue;
++            }
++            SDLTest_AssertCheck(locale->language && SDL_strcmp(locale->language, expected[i].language) == 0,
++                                "Check language of entry %d for \"%s\", expected: \"%s\", got: \"%s\"", i, hint, expected[i].language, locale->language ? locale->language : "(null)");
++            if (expected[i].country) {
++                SDLTest_AssertCheck(locale->country && SDL_strcmp(locale->country, expected[i].country) == 0,
++                                    "Check country of entry %d for \"%s\", expected: \"%s\", got: \"%s\"", i, hint, expected[i].country, locale->country ? locale->country : "(null)");
++            } else {
++                SDLTest_AssertCheck(locale->country == NULL, "Check country of entry %d for \"%s\" is NULL", i, hint);
++            }
++        }
++        SDLTest_AssertCheck(locales[count] == NULL, "Check list for \"%s\" ends with NULL", hint);
++    }
++
++    SDL_free(locales);
++    SDL_ResetHint(SDL_HINT_PREFERRED_LOCALES);
++}
++
++/**
++ * Call to SDL_GetPreferredLocales with a list from SDL_HINT_PREFERRED_LOCALES
++ */
++static int SDLCALL locale_testPreferredLocalesHint(void *arg)
++{
++    const ExpectedLocale en_us_fr[] = { { "en", "US" }, { "fr", NULL } };
++    const ExpectedLocale en[] = { { "en", NULL } };
++    const ExpectedLocale en_fr[] = { { "en", NULL }, { "fr", NULL } };
++
++    checkPreferredLocales("en_US, fr", en_us_fr, 2);
++    checkPreferredLocales("en,", en, 1);
++    checkPreferredLocales(",en", en, 1);
++    checkPreferredLocales("en,,fr", en_fr, 2);
++    checkPreferredLocales(" , ", NULL, 0);
++    checkPreferredLocales("", NULL, 0);
++
++    return TEST_COMPLETED;
++}
++
++/* ================= Test References ================== */
++
++static const SDLTest_TestCaseReference localeTest1 = {
++    locale_testPreferredLocalesHint, "locale_testPreferredLocalesHint", "Call to SDL_GetPreferredLocales with SDL_HINT_PREFERRED_LOCALES", TEST_ENABLED
++};
++
++/* Sequence of Locale test cases */
++static const SDLTest_TestCaseReference *localeTests[] = {
++    &localeTest1,
++    NULL
++};
++
++/* Locale test suite (global) */
++SDLTest_TestSuiteReference localeTestSuite = {
++    "Locale",
++    NULL,
++    localeTests,
++    NULL
++};
+diff --git a/test/testautomation_suites.h b/test/testautomation_suites.h
+index e683f791088387b2d23e1b9e0f90c9f89903d216..53402e6ab7b1d9e6e31eb6e9460e28dcc7ebac4c 100644
+--- a/test/testautomation_suites.h
++++ b/test/testautomation_suites.h
+@@ -20,6 +20,7 @@ extern SDLTest_TestSuiteReference hintsTestSuite;
+ extern SDLTest_TestSuiteReference intrinsicsTestSuite;
+ extern SDLTest_TestSuiteReference joystickTestSuite;
+ extern SDLTest_TestSuiteReference keyboardTestSuite;
++extern SDLTest_TestSuiteReference localeTestSuite;
+ extern SDLTest_TestSuiteReference logTestSuite;
+ extern SDLTest_TestSuiteReference mainTestSuite;
+ extern SDLTest_TestSuiteReference mathTestSuite;
