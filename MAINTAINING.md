@@ -28,6 +28,8 @@ Create `patches/NNNN-name/README.md` with a plain title, what the patch does and
 
 Declare it in `include/XDL/XDL.h` with an `XDL_` prefix, and append it to `SDL_dynapi_procs.h`, `SDL_dynapi_overrides.h` and `SDL_dynapi.sym`. If it changes XDL's dynamic API table in an incompatible way, increase the counter in `SDL_DYNAPI_VERSION`.
 
+A satellite has no dynamic API. Declare its additions with an `XDL_` prefix in its own header next to the stock ones, such as `include/SDL3_ttf/XDL_ttf.h`, add the header to the satellite's `install(FILES ...)` list, and append each function to the satellite's `.sym` file, such as `src/SDL_ttf.sym`.
+
 ## Releases
 
 Merging a pull request that raises `XDL_VERSION` to `main` releases it. The Release workflow builds every target and publishes the GitHub release `v<XDL_VERSION>`. It holds one zip per target with `runtimes/<rid>/native/` and `THIRD-PARTY-NOTICES.txt`, `xdl3-headers.zip` with `include/` from the `linux-x64` job and `THIRD-PARTY-NOTICES.txt`, a copy of `THIRD-PARTY-NOTICES.txt` to read online, and notes with each library's tag and commit.

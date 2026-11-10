@@ -1,0 +1,189 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: botoddly <250804054+botoddly@users.noreply.github.com>
+Date: Tue, 10 Nov 2026 12:58:11 +0100
+Subject: [PATCH] char-spacing: Add XDL_SetFontCharSpacing for extra space
+ after each character
+
+---
+ CMakeLists.txt             |  1 +
+ include/SDL3_ttf/XDL_ttf.h | 68 ++++++++++++++++++++++++++++++++++++++
+ src/SDL_ttf.c              | 32 ++++++++++++++++--
+ src/SDL_ttf.sym            |  1 +
+ 4 files changed, 100 insertions(+), 2 deletions(-)
+ create mode 100644 include/SDL3_ttf/XDL_ttf.h
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 3536b48b77e78144e2b777d67d518a7f29ae6852..a9877ed7b75ca5e28cfa8aac0db186e7bb8029eb 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -426,6 +426,7 @@ if(SDLTTF_INSTALL)
+     install(FILES
+         "${CMAKE_CURRENT_SOURCE_DIR}/include/SDL3_ttf/SDL_textengine.h"
+         "${CMAKE_CURRENT_SOURCE_DIR}/include/SDL3_ttf/SDL_ttf.h"
++        "${CMAKE_CURRENT_SOURCE_DIR}/include/SDL3_ttf/XDL_ttf.h"
+         DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/SDL3_ttf" COMPONENT devel
+     )
+     if(BUILD_SHARED_LIBS)
+diff --git a/include/SDL3_ttf/XDL_ttf.h b/include/SDL3_ttf/XDL_ttf.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..4c18be149721152c7b1d5e70c9db5be3090f9e66
+--- /dev/null
++++ b/include/SDL3_ttf/XDL_ttf.h
+@@ -0,0 +1,68 @@
++/*
++  XDL_ttf
++  Copyright (C) 2026 Stan (stanoddly)
++
++  This software is provided 'as-is', without any express or implied
++  warranty.  In no event will the authors be held liable for any damages
++  arising from the use of this software.
++
++  Permission is granted to anyone to use this software for any purpose,
++  including commercial applications, and to alter it and redistribute it
++  freely, subject to the following restrictions:
++
++  1. The origin of this software must not be misrepresented; you must not
++     claim that you wrote the original software. If you use this software
++     in a product, an acknowledgment in the product documentation would be
++     appreciated but is not required.
++  2. Altered source versions must be plainly marked as such, and must not be
++     misrepresented as being the original software.
++  3. This notice may not be removed or altered from any source distribution.
++*/
++
++/**
++ * # XDL_ttf
++ *
++ * The API that XDL adds to SDL_ttf. None of this exists in stock SDL_ttf.
++ */
++
++#ifndef XDL_ttf_h_
++#define XDL_ttf_h_
++
++#include <SDL3_ttf/SDL_ttf.h>
++
++#include <SDL3/SDL_begin_code.h>
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++/**
++ * Set additional space in pixels between any two characters of a font.
++ *
++ * The spacing is added after each character, also after the last one, so it
++ * widens measured and rendered text. A negative value moves characters
++ * closer. The spacing keeps 1/64 pixel precision.
++ *
++ * With HarfBuzz, a character is a cluster: a letter with its combining marks
++ * moves as one, and so does a ligature. Without it, each glyph is one.
++ *
++ * This updates any TTF_Text objects using this font, and clears already
++ * generated glyphs, if any, from the cache.
++ *
++ * \param font the font to set the spacing for.
++ * \param spacing the additional spacing in pixels, 0 for none, from -32768
++ *                to 32767.
++ * \returns true on success or false on failure; call SDL_GetError() for more
++ *          information.
++ *
++ * \threadsafety This function should be called on the thread that created the
++ *               font.
++ */
++extern SDL_DECLSPEC bool SDLCALL XDL_SetFontCharSpacing(TTF_Font *font, float spacing);
++
++#ifdef __cplusplus
++}
++#endif
++#include <SDL3/SDL_close_code.h>
++
++#endif /* XDL_ttf_h_ */
+diff --git a/src/SDL_ttf.c b/src/SDL_ttf.c
+index be517a1876e8c7a85a69395477b4e18fb3592a69..5b6e75401dead93115c94de2f807a18418cb9d1f 100644
+--- a/src/SDL_ttf.c
++++ b/src/SDL_ttf.c
+@@ -22,6 +22,7 @@
+ #include <SDL3/SDL.h>
+ #include <SDL3_ttf/SDL_ttf.h>
+ #include <SDL3_ttf/SDL_textengine.h>
++#include <SDL3_ttf/XDL_ttf.h>
+ 
+ #include "SDL_hashtable.h"
+ 
+@@ -313,6 +314,9 @@ struct TTF_Font {
+ 
+     // Whether kerning is desired
+     bool enable_kerning;
++
++    // Additional space after each character, a cluster with HarfBuzz, in 26.6 fixed point
++    FT_Pos char_spacing;
+ #if !TTF_USE_HARFBUZZ
+     bool use_kerning;
+ #endif
+@@ -3366,6 +3370,10 @@ static bool CollectGlyphsFromFont(TTF_Font *font, const char *text, size_t lengt
+         pos->font = font;
+         pos->index = hb_glyph_info[i].codepoint;
+         pos->x_advance = hb_glyph_position[i].x_advance + advance_if_bold;
++        // The spacing follows a cluster's last glyph, so a letter keeps its marks and a ligature counts once
++        if (i + 1 == glyph_count || hb_glyph_info[i + 1].cluster != hb_glyph_info[i].cluster) {
++            pos->x_advance += font->char_spacing;
++        }
+         pos->y_advance = hb_glyph_position[i].y_advance;
+         pos->x_offset = hb_glyph_position[i].x_offset;
+         pos->y_offset = hb_glyph_position[i].y_offset;
+@@ -3424,7 +3432,7 @@ static bool CollectGlyphsFromFont(TTF_Font *font, const char *text, size_t lengt
+         pos->index = idx;
+         pos->glyph = glyph;
+         pos->offset = offset;
+-        pos->x_advance = glyph->advance;
++        pos->x_advance = glyph->advance + font->char_spacing;
+         pos->y_advance = 0;
+         pos->x_offset = 0;
+         pos->y_offset = 0;
+@@ -3593,7 +3601,7 @@ static bool CollectGlyphs(TTF_Font *font, const char *text, size_t length, TTF_D
+             if (!Find_GlyphByIndex(font, pos->index, 0, 0, 0, 0, 0, 0, &pos->glyph, NULL)) {
+                 return SDL_SetError("Couldn't find glyph %u in font", pos->index);
+             }
+-            pos->x_advance = pos->glyph->advance;
++            pos->x_advance = pos->glyph->advance + font->char_spacing;
+             pos->y_advance = 0;
+             pos->x_offset = 0;
+             pos->y_offset = 0;
+@@ -5967,6 +5975,26 @@ TTF_Direction TTF_GetFontDirection(TTF_Font *font)
+     return font->direction;
+ }
+ 
++bool XDL_SetFontCharSpacing(TTF_Font *font, float spacing)
++{
++    TTF_CHECK_FONT(font, false);
++
++    // Also rejects NaN, and keeps the spacing in 26.6 fixed point within an int.
++    if (!(spacing >= -32768.0f && spacing <= 32767.0f)) {
++        return SDL_InvalidParamError("spacing");
++    }
++
++    FT_Pos char_spacing = (FT_Pos)SDL_roundf(spacing * 64.0f);
++    if (char_spacing == font->char_spacing) {
++        return true;
++    }
++
++    font->char_spacing = char_spacing;
++    Flush_Cache(font);
++    UpdateFontText(font, NULL);
++    return true;
++}
++
+ Uint32 TTF_StringToTag(const char *string)
+ {
+     Uint8 bytes[4] = { 0, 0, 0, 0 };
+diff --git a/src/SDL_ttf.sym b/src/SDL_ttf.sym
+index 564eaf36317875c25d13ce4d8293ac2e7efb06cc..d32b4c0cdb39246f87e8a147124b8a08eee417cc 100644
+--- a/src/SDL_ttf.sym
++++ b/src/SDL_ttf.sym
+@@ -117,5 +117,6 @@ SDL3_ttf_0.0.0 {
+     TTF_UpdateText;
+     TTF_Version;
+     TTF_WasInit;
++    XDL_SetFontCharSpacing;
+   local: *;
+ };

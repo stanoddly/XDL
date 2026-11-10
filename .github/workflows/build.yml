@@ -238,8 +238,8 @@ jobs:
             "-DRUNTIME_DIR=$PWD/runtimes/${{ matrix.rid }}/native" "-DXDL_REVISION=$XDL_REVISION"
           cmake --build build/satellites --config Release
 
-      # Once per library loaded first, so a satellite must find XDL3 next to itself
-      - name: Load the runtime
+      # The runtime once per library loaded first, so a satellite must find XDL3 next to itself, and XDL's additions to SDL_ttf
+      - name: Load the runtime and test the satellites
         if: matrix.ctest
         run: ctest --test-dir build/satellites -C Release --no-tests=error --output-on-failure
 
