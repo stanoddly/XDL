@@ -5,16 +5,16 @@ Subject: [PATCH] font-variations: Add XDL_SetFontVariations for the axes of a
  variable font
 
 ---
- include/SDL3_ttf/XDL_ttf.h |  29 ++++++++++
- src/SDL_ttf.c              | 111 +++++++++++++++++++++++++++++++++----
+ include/SDL3_ttf/XDL_ttf.h |  31 +++++++
+ src/SDL_ttf.c              | 179 ++++++++++++++++++++++++++++++++++---
  src/SDL_ttf.sym            |   1 +
- 3 files changed, 131 insertions(+), 10 deletions(-)
+ 3 files changed, 201 insertions(+), 10 deletions(-)
 
 diff --git a/include/SDL3_ttf/XDL_ttf.h b/include/SDL3_ttf/XDL_ttf.h
-index 3e707b5e634a62126dc2c4482c37b3ddf489ef14..a3275c41c3ea2d2002259ced29d8ffcc989e8b7c 100644
+index 9d633c328a6f9069b546f4aa4d51c5d9d5ddd917..ecefb84caaee69dd8cfc14ce65a7d439fc385ffd 100644
 --- a/include/SDL3_ttf/XDL_ttf.h
 +++ b/include/SDL3_ttf/XDL_ttf.h
-@@ -87,6 +87,35 @@ extern SDL_DECLSPEC bool SDLCALL XDL_SetFontCharSpacing(TTF_Font *font, float sp
+@@ -90,6 +90,37 @@ extern SDL_DECLSPEC bool SDLCALL XDL_SetFontCharSpacing(TTF_Font *font, float sp
   */
  extern SDL_DECLSPEC bool SDLCALL XDL_SetFontFeatures(TTF_Font *font, const char *features);
  
@@ -30,8 +30,10 @@ index 3e707b5e634a62126dc2c4482c37b3ddf489ef14..a3275c41c3ea2d2002259ced29d8ffcc
 + *
 + * The values replace the ones set before. On failure the font keeps its
 + * previous values. When the font has a `wght` axis, TTF_GetFontWeight()
-+ * returns its new value. TTF_CopyFont() does not copy the values, so a copy
-+ * renders, and reports the weight of, its own face.
++ * returns its new value. TTF_CopyFont() copies the values and the weight.
++ * TTF_OpenFontWithProperties() with TTF_PROP_FONT_CREATE_EXISTING_FONT copies
++ * them only for the same face number, and only when the new face has the same
++ * axes. A copy at another named instance keeps that instance's values.
 + *
 + * This updates the font's metrics and any TTF_Text objects using this font,
 + * and clears already generated glyphs, if any, from the cache.
@@ -51,7 +53,7 @@ index 3e707b5e634a62126dc2c4482c37b3ddf489ef14..a3275c41c3ea2d2002259ced29d8ffcc
  }
  #endif
 diff --git a/src/SDL_ttf.c b/src/SDL_ttf.c
-index 3b07ccb0f4f26f832991be0aee2deba72e4cb63e..30e08de8cc6c80dcd7248e35161945346469e8b8 100644
+index 095c21914aa94a14bb6651a070b3505fdee78013..39620922d9ba9ad7003eafc99d35d7abefddb411 100644
 --- a/src/SDL_ttf.c
 +++ b/src/SDL_ttf.c
 @@ -34,6 +34,7 @@
@@ -62,7 +64,85 @@ index 3b07ccb0f4f26f832991be0aee2deba72e4cb63e..30e08de8cc6c80dcd7248e3516194534
  
  /* Enable rendering with color
   * Freetype may need to be compiled with FT_CONFIG_OPTION_USE_PNG */
-@@ -2139,7 +2140,6 @@ TTF_Font *TTF_OpenFontWithProperties(SDL_PropertiesID props)
+@@ -355,6 +356,9 @@ struct TTF_Font {
+     // Features from XDL_SetFontFeatures, after a first slot that shaping fills with the kern feature
+     hb_feature_t *hb_features;
+     unsigned int num_hb_features;
++
++    // Whether XDL_SetFontVariations set values, which a copy then takes
++    bool has_variations;
+ #endif
+     Uint32 script; // ISO 15924 script tag
+     TTF_Direction direction;
+@@ -1935,6 +1939,67 @@ static void TTF_CloseFontSource(SDL_IOStream *src)
+     SDL_CloseIO(src);
+ }
+ 
++// The weight in a face's OS2 TrueType table, which for a variable font is its default instance's
++static int GetFaceWeight(FT_Face face)
++{
++    const TT_OS2 *os2_table = (const TT_OS2 *)FT_Get_Sfnt_Table(face, FT_SFNT_OS2);
++    if (os2_table != NULL && os2_table->usWeightClass != 0) {
++        return os2_table->usWeightClass;
++    } else if (face->style_flags & FT_STYLE_FLAG_BOLD) {
++        return TTF_FONT_WEIGHT_BOLD;
++    } else {
++        return TTF_FONT_WEIGHT_NORMAL;
++    }
++}
++
++#if TTF_USE_HARFBUZZ
++/* Gives a copy of the same face the design coordinates that XDL_SetFontVariations set on the font it copies. A copy of another
++ * font file with the same face number, through TTF_PROP_FONT_CREATE_IOSTREAM_POINTER, keeps its own defaults and weight when
++ * its axes differ. */
++static bool CopyFontVariations(TTF_Font *font, const TTF_Font *existing_font)
++{
++    FT_MM_Var *existing_mm_var = NULL;
++    FT_MM_Var *mm_var = NULL;
++    FT_Fixed *coords = NULL;
++    bool same_axes = false;
++
++    FT_Error error = FT_Get_MM_Var(existing_font->face, &existing_mm_var);
++    if (!error && FT_HAS_MULTIPLE_MASTERS(font->face)) {
++        error = FT_Get_MM_Var(font->face, &mm_var);
++    }
++    if (!error && mm_var && mm_var->num_axis == existing_mm_var->num_axis) {
++        same_axes = true;
++        for (FT_UInt i = 0; i < mm_var->num_axis; ++i) {
++            same_axes = same_axes && mm_var->axis[i].tag == existing_mm_var->axis[i].tag;
++        }
++    }
++    if (!error && same_axes) {
++        coords = (FT_Fixed *)SDL_malloc(mm_var->num_axis * sizeof(*coords));
++        if (!coords) {
++            error = FT_Err_Out_Of_Memory;
++        } else {
++            error = FT_Get_Var_Design_Coordinates(existing_font->face, mm_var->num_axis, coords);
++        }
++        if (!error) {
++            error = FT_Set_Var_Design_Coordinates(font->face, mm_var->num_axis, coords);
++        }
++        if (!error) {
++            font->has_variations = true;
++        }
++    } else if (!error) {
++        font->weight = GetFaceWeight(font->face);
++    }
++
++    SDL_free(coords);
++    FT_Done_MM_Var(TTF_state.library, mm_var);
++    FT_Done_MM_Var(TTF_state.library, existing_mm_var);
++    if (error) {
++        return TTF_SetFTError("Couldn't copy font variations", error);
++    }
++    return true;
++}
++#endif
++
+ TTF_Font *TTF_OpenFontWithProperties(SDL_PropertiesID props)
+ {
+     TTF_Font *existing_font = SDL_GetPointerProperty(props, TTF_PROP_FONT_CREATE_EXISTING_FONT, NULL);
+@@ -2139,7 +2204,6 @@ TTF_Font *TTF_OpenFontWithProperties(SDL_PropertiesID props)
      // Set the default font style
      if (existing_font) {
          font->style = existing_font->style;
@@ -70,7 +150,7 @@ index 3b07ccb0f4f26f832991be0aee2deba72e4cb63e..30e08de8cc6c80dcd7248e3516194534
          font->outline = existing_font->outline;
          font->ft_load_target = existing_font->ft_load_target;
          font->enable_kerning = existing_font->enable_kerning;
-@@ -2148,16 +2148,17 @@ TTF_Font *TTF_OpenFontWithProperties(SDL_PropertiesID props)
+@@ -2161,19 +2225,23 @@ TTF_Font *TTF_OpenFontWithProperties(SDL_PropertiesID props)
          font->outline = 0;
          font->ft_load_target = FT_LOAD_TARGET_NORMAL;
          TTF_SetFontKerning(font, true);
@@ -85,19 +165,25 @@ index 3b07ccb0f4f26f832991be0aee2deba72e4cb63e..30e08de8cc6c80dcd7248e3516194534
 -        } else {
 -            font->weight = TTF_FONT_WEIGHT_NORMAL;
 -        }
-+    /* Retrieve the weight from the OS2 TrueType table, also for a copy, which does not take the variations of
-+     * XDL_SetFontVariations and so renders at the weight of its own face */
-+    const TT_OS2 *os2_table = (const TT_OS2 *)FT_Get_Sfnt_Table(face, FT_SFNT_OS2);
-+    if (os2_table != NULL && os2_table->usWeightClass != 0) {
-+        font->weight = os2_table->usWeightClass;
-+    } else if (face->style_flags & FT_STYLE_FLAG_BOLD) {
-+        font->weight = TTF_FONT_WEIGHT_BOLD;
++    /* A copy of the same face takes the original's weight, which follows XDL_SetFontVariations. Another face, such as another
++     * named instance, reads its own. */
++    if (existing_font && face_index == existing_font->face_index) {
++        font->weight = existing_font->weight;
 +    } else {
-+        font->weight = TTF_FONT_WEIGHT_NORMAL;
++        font->weight = GetFaceWeight(face);
      }
  
  #if TTF_USE_HARFBUZZ
-@@ -6054,6 +6055,96 @@ bool XDL_SetFontFeatures(TTF_Font *font, const char *features)
++    // Before the HarfBuzz font, which reads the coordinates when it is created
++    if (existing_font && existing_font->has_variations && face_index == existing_font->face_index && !CopyFontVariations(font, existing_font)) {
++        TTF_CloseFont(font);
++        return NULL;
++    }
++
+     font->hb_font = hb_ft_font_create(face, NULL);
+     if (font->hb_font == NULL) {
+         SDL_SetError("Cannot create harfbuzz font");
+@@ -6067,6 +6135,97 @@ bool XDL_SetFontFeatures(TTF_Font *font, const char *features)
  #endif
  }
  
@@ -174,6 +260,7 @@ index 3b07ccb0f4f26f832991be0aee2deba72e4cb63e..30e08de8cc6c80dcd7248e3516194534
 +        }
 +    }
 +
++    font->has_variations = any;
 +    TTF_InitFontMetrics(font);
 +    Flush_Cache(font);
 +    UpdateFontText(font, NULL);
