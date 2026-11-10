@@ -8,6 +8,6 @@ XDL holds patches for a released SDL, and for released SDL_image, SDL_ttf and SD
 - To read a patch in context, run `git submodule update --init external/SDL`, then `tools/apply.sh`, and read `build/SDL`. For a satellite, use its name in both commands.
 - A commit in `build/SDL` has a single-line subject that starts with its patch name: `library-name: Build the library as XDL3`.
 - Keep one logical step per commit, and update the patch's `README.md` when its behavior changes.
-- Anything XDL adds to the public API uses the `XDL_` prefix and lives in `include/XDL/XDL.h`.
+- Anything XDL adds to the public API uses the `XDL_` prefix and lives in `include/XDL/XDL.h`, or for a satellite in its own header such as `include/SDL3_ttf/XDL_ttf.h`.
 - Send nothing LLM-written to `libsdl-org`: no code, PRs, issues or comments. SDL's `AGENTS.md` bars it.
 - Run `tests/tooling/run.sh` after changing anything in `tools/`.

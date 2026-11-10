@@ -1,0 +1,162 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: botoddly <250804054+botoddly@users.noreply.github.com>
+Date: Tue, 10 Nov 2026 12:58:59 +0100
+Subject: [PATCH] font-features: Add XDL_SetFontFeatures for the OpenType
+ features of shaping
+
+---
+ include/SDL3_ttf/XDL_ttf.h | 27 ++++++++++++++++
+ src/SDL_ttf.c              | 64 ++++++++++++++++++++++++++++++++++++--
+ src/SDL_ttf.sym            |  1 +
+ 3 files changed, 90 insertions(+), 2 deletions(-)
+
+diff --git a/include/SDL3_ttf/XDL_ttf.h b/include/SDL3_ttf/XDL_ttf.h
+index 4c18be149721152c7b1d5e70c9db5be3090f9e66..3e707b5e634a62126dc2c4482c37b3ddf489ef14 100644
+--- a/include/SDL3_ttf/XDL_ttf.h
++++ b/include/SDL3_ttf/XDL_ttf.h
+@@ -60,6 +60,33 @@ extern "C" {
+  */
+ extern SDL_DECLSPEC bool SDLCALL XDL_SetFontCharSpacing(TTF_Font *font, float spacing);
+ 
++/**
++ * Set the OpenType features that shaping applies to a font.
++ *
++ * `features` is a comma-separated list in HarfBuzz's feature syntax: `tnum`
++ * turns tabular figures on, `-liga` turns standard ligatures off, and
++ * `ss01=1` selects stylistic set 1. HarfBuzz also reads CSS's form, such as
++ * `"tnum" 1`. A feature the font does not have changes nothing. Kerning
++ * stays under TTF_SetFontKerning(), unless the list names `kern`, which then
++ * wins.
++ *
++ * The features replace the ones set before. NULL or an empty string clears
++ * them. On failure the font keeps its previous features.
++ *
++ * This updates any TTF_Text objects using this font, and clears already
++ * generated glyphs, if any, from the cache.
++ *
++ * \param font the font to set the features for.
++ * \param features the features, or NULL for none.
++ * \returns true on success or false on failure, such as an item that is not a
++ *          feature or an SDL_ttf built without HarfBuzz; call SDL_GetError()
++ *          for more information.
++ *
++ * \threadsafety This function should be called on the thread that created the
++ *               font.
++ */
++extern SDL_DECLSPEC bool SDLCALL XDL_SetFontFeatures(TTF_Font *font, const char *features);
++
+ #ifdef __cplusplus
+ }
+ #endif
+diff --git a/src/SDL_ttf.c b/src/SDL_ttf.c
+index 5b6e75401dead93115c94de2f807a18418cb9d1f..3b07ccb0f4f26f832991be0aee2deba72e4cb63e 100644
+--- a/src/SDL_ttf.c
++++ b/src/SDL_ttf.c
+@@ -351,6 +351,10 @@ struct TTF_Font {
+ #if TTF_USE_HARFBUZZ
+     hb_font_t *hb_font;
+     hb_language_t hb_language;
++
++    // Features from XDL_SetFontFeatures, after a first slot that shaping fills with the kern feature
++    hb_feature_t *hb_features;
++    unsigned int num_hb_features;
+ #endif
+     Uint32 script; // ISO 15924 script tag
+     TTF_Direction direction;
+@@ -3331,13 +3335,19 @@ static bool CollectGlyphsFromFont(TTF_Font *font, const char *text, size_t lengt
+     hb_buffer_add_utf8(hb_buffer, text, (int)length, 0, -1);
+     hb_buffer_guess_segment_properties(hb_buffer);
+ 
+-    hb_feature_t userfeatures[1];
++    hb_feature_t kerning[1];
++    hb_feature_t *userfeatures = kerning;
++    unsigned int num_userfeatures = 1;
++    if (font->hb_features) {
++        userfeatures = font->hb_features;
++        num_userfeatures += font->num_hb_features;
++    }
+     userfeatures[0].tag = HB_TAG('k','e','r','n');
+     userfeatures[0].value = font->enable_kerning;
+     userfeatures[0].start = HB_FEATURE_GLOBAL_START;
+     userfeatures[0].end = HB_FEATURE_GLOBAL_END;
+ 
+-    hb_shape(font->hb_font, hb_buffer, userfeatures, 1);
++    hb_shape(font->hb_font, hb_buffer, userfeatures, num_userfeatures);
+ 
+     // Get the result
+     unsigned int glyph_count_u = 0;
+@@ -5995,6 +6005,55 @@ bool XDL_SetFontCharSpacing(TTF_Font *font, float spacing)
+     return true;
+ }
+ 
++bool XDL_SetFontFeatures(TTF_Font *font, const char *features)
++{
++    TTF_CHECK_FONT(font, false);
++
++#if TTF_USE_HARFBUZZ
++    hb_feature_t *parsed = NULL;
++    unsigned int count = 0;
++    if (features && *features) {
++        unsigned int capacity = 1;
++        for (const char *c = features; *c; ++c) {
++            if (*c == ',') {
++                ++capacity;
++            }
++        }
++
++        // The first slot is for the kern feature
++        parsed = (hb_feature_t *)SDL_malloc((1 + capacity) * sizeof(*parsed));
++        if (!parsed) {
++            return false;
++        }
++
++        const char *item = features;
++        for (;;) {
++            const char *end = SDL_strchr(item, ',');
++            int length = (int)(end ? (size_t)(end - item) : SDL_strlen(item));
++            if (!hb_feature_from_string(item, length, &parsed[1 + count])) {
++                SDL_free(parsed);
++                return SDL_SetError("Couldn't parse font feature '%.*s'", length, item);
++            }
++            ++count;
++            if (!end) {
++                break;
++            }
++            item = end + 1;
++        }
++    }
++
++    SDL_free(font->hb_features);
++    font->hb_features = parsed;
++    font->num_hb_features = count;
++    Flush_Cache(font);
++    UpdateFontText(font, NULL);
++    return true;
++#else
++    (void)features;
++    return SDL_Unsupported();
++#endif
++}
++
+ Uint32 TTF_StringToTag(const char *string)
+ {
+     Uint8 bytes[4] = { 0, 0, 0, 0 };
+@@ -6148,6 +6207,7 @@ void TTF_CloseFont(TTF_Font *font)
+ 
+ #if TTF_USE_HARFBUZZ
+     hb_font_destroy(font->hb_font);
++    SDL_free(font->hb_features);
+ #endif
+     if (font->props) {
+         SDL_DestroyProperties(font->props);
+diff --git a/src/SDL_ttf.sym b/src/SDL_ttf.sym
+index d32b4c0cdb39246f87e8a147124b8a08eee417cc..50793b0b835f7fc8e2b56dfc93f18704575aad25 100644
+--- a/src/SDL_ttf.sym
++++ b/src/SDL_ttf.sym
+@@ -118,5 +118,6 @@ SDL3_ttf_0.0.0 {
+     TTF_Version;
+     TTF_WasInit;
+     XDL_SetFontCharSpacing;
++    XDL_SetFontFeatures;
+   local: *;
+ };
