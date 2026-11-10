@@ -6,10 +6,10 @@ Subject: [PATCH] char-spacing: Add XDL_SetFontCharSpacing for extra space
 
 ---
  CMakeLists.txt             |  1 +
- include/SDL3_ttf/XDL_ttf.h | 68 ++++++++++++++++++++++++++++++++++++++
- src/SDL_ttf.c              | 32 ++++++++++++++++--
+ include/SDL3_ttf/XDL_ttf.h | 70 ++++++++++++++++++++++++++++++++++++++
+ src/SDL_ttf.c              | 33 ++++++++++++++++--
  src/SDL_ttf.sym            |  1 +
- 4 files changed, 100 insertions(+), 2 deletions(-)
+ 4 files changed, 103 insertions(+), 2 deletions(-)
  create mode 100644 include/SDL3_ttf/XDL_ttf.h
 
 diff --git a/CMakeLists.txt b/CMakeLists.txt
@@ -26,10 +26,10 @@ index 3536b48b77e78144e2b777d67d518a7f29ae6852..a9877ed7b75ca5e28cfa8aac0db186e7
      if(BUILD_SHARED_LIBS)
 diff --git a/include/SDL3_ttf/XDL_ttf.h b/include/SDL3_ttf/XDL_ttf.h
 new file mode 100644
-index 0000000000000000000000000000000000000000..4c18be149721152c7b1d5e70c9db5be3090f9e66
+index 0000000000000000000000000000000000000000..b1e69853465c80db5a9fef4f55568a09a7995f8e
 --- /dev/null
 +++ b/include/SDL3_ttf/XDL_ttf.h
-@@ -0,0 +1,68 @@
+@@ -0,0 +1,70 @@
 +/*
 +  XDL_ttf
 +  Copyright (C) 2026 Stan (stanoddly)
@@ -78,6 +78,8 @@ index 0000000000000000000000000000000000000000..4c18be149721152c7b1d5e70c9db5be3
 + * With HarfBuzz, a character is a cluster: a letter with its combining marks
 + * moves as one, and so does a ligature. Without it, each glyph is one.
 + *
++ * TTF_CopyFont() copies the spacing.
++ *
 + * This updates any TTF_Text objects using this font, and clears already
 + * generated glyphs, if any, from the cache.
 + *
@@ -99,7 +101,7 @@ index 0000000000000000000000000000000000000000..4c18be149721152c7b1d5e70c9db5be3
 +
 +#endif /* XDL_ttf_h_ */
 diff --git a/src/SDL_ttf.c b/src/SDL_ttf.c
-index be517a1876e8c7a85a69395477b4e18fb3592a69..5b6e75401dead93115c94de2f807a18418cb9d1f 100644
+index be517a1876e8c7a85a69395477b4e18fb3592a69..6b370fbff14315ce20791d26a476d905e4f11d54 100644
 --- a/src/SDL_ttf.c
 +++ b/src/SDL_ttf.c
 @@ -22,6 +22,7 @@
@@ -120,7 +122,15 @@ index be517a1876e8c7a85a69395477b4e18fb3592a69..5b6e75401dead93115c94de2f807a184
  #if !TTF_USE_HARFBUZZ
      bool use_kerning;
  #endif
-@@ -3366,6 +3370,10 @@ static bool CollectGlyphsFromFont(TTF_Font *font, const char *text, size_t lengt
+@@ -2135,6 +2139,7 @@ TTF_Font *TTF_OpenFontWithProperties(SDL_PropertiesID props)
+         font->outline = existing_font->outline;
+         font->ft_load_target = existing_font->ft_load_target;
+         font->enable_kerning = existing_font->enable_kerning;
++        font->char_spacing = existing_font->char_spacing;
+     } else {
+         font->style = TTF_STYLE_NORMAL;
+         font->outline = 0;
+@@ -3366,6 +3371,10 @@ static bool CollectGlyphsFromFont(TTF_Font *font, const char *text, size_t lengt
          pos->font = font;
          pos->index = hb_glyph_info[i].codepoint;
          pos->x_advance = hb_glyph_position[i].x_advance + advance_if_bold;
@@ -131,7 +141,7 @@ index be517a1876e8c7a85a69395477b4e18fb3592a69..5b6e75401dead93115c94de2f807a184
          pos->y_advance = hb_glyph_position[i].y_advance;
          pos->x_offset = hb_glyph_position[i].x_offset;
          pos->y_offset = hb_glyph_position[i].y_offset;
-@@ -3424,7 +3432,7 @@ static bool CollectGlyphsFromFont(TTF_Font *font, const char *text, size_t lengt
+@@ -3424,7 +3433,7 @@ static bool CollectGlyphsFromFont(TTF_Font *font, const char *text, size_t lengt
          pos->index = idx;
          pos->glyph = glyph;
          pos->offset = offset;
@@ -140,7 +150,7 @@ index be517a1876e8c7a85a69395477b4e18fb3592a69..5b6e75401dead93115c94de2f807a184
          pos->y_advance = 0;
          pos->x_offset = 0;
          pos->y_offset = 0;
-@@ -3593,7 +3601,7 @@ static bool CollectGlyphs(TTF_Font *font, const char *text, size_t length, TTF_D
+@@ -3593,7 +3602,7 @@ static bool CollectGlyphs(TTF_Font *font, const char *text, size_t length, TTF_D
              if (!Find_GlyphByIndex(font, pos->index, 0, 0, 0, 0, 0, 0, &pos->glyph, NULL)) {
                  return SDL_SetError("Couldn't find glyph %u in font", pos->index);
              }
@@ -149,7 +159,7 @@ index be517a1876e8c7a85a69395477b4e18fb3592a69..5b6e75401dead93115c94de2f807a184
              pos->y_advance = 0;
              pos->x_offset = 0;
              pos->y_offset = 0;
-@@ -5967,6 +5975,26 @@ TTF_Direction TTF_GetFontDirection(TTF_Font *font)
+@@ -5967,6 +5976,26 @@ TTF_Direction TTF_GetFontDirection(TTF_Font *font)
      return font->direction;
  }
  

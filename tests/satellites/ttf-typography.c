@@ -93,15 +93,26 @@ int main(int argc, char **argv)
     check(XDL_SetFontVariations(font, "wght=600"), "XDL_SetFontVariations(\"wght=600\")");
     Uint64 semibold = Coverage(font, "Hello");
     check(light < regular && regular < semibold, "a heavier weight covers more pixels");
+    check(XDL_SetFontFeatures(font, "tnum") && XDL_SetFontCharSpacing(font, 2.0f), "features and spacing to copy");
+    int tracked = Width(font, "Hello");
     TTF_Font *copy = TTF_CopyFont(font);
-    check(copy != NULL && TTF_GetFontWeight(copy) == 400 && Coverage(copy, "Hello") == regular, "a copy renders and reports its own face's weight");
-    TTF_CloseFont(copy);
+    check(copy != NULL, "TTF_CopyFont");
+    if (copy) {
+        check(TTF_GetFontWeight(copy) == 600 && Coverage(copy, "Hello") == semibold, "a copy takes the variations and their weight");
+        check(Width(copy, "1111.11") == Width(copy, "8888.88"), "a copy takes the features");
+        check(Width(copy, "Hello") == tracked, "a copy takes the spacing");
+        TTF_CloseFont(copy);
+    }
+    check(XDL_SetFontFeatures(font, NULL) && XDL_SetFontCharSpacing(font, 0.0f), "clear the features and spacing");
     check(!XDL_SetFontVariations(font, "wdth=90"), "an axis the font lacks fails");
     check(TTF_GetFontWeight(font) == 600, "a failed call keeps the variations");
     check(XDL_SetFontVariations(font, "wght=5000"), "XDL_SetFontVariations(\"wght=5000\")");
     check(TTF_GetFontWeight(font) == 800, "a value is clamped to the axis");
     check(XDL_SetFontVariations(font, NULL), "XDL_SetFontVariations(NULL)");
     check(TTF_GetFontWeight(font) == 400 && Coverage(font, "Hello") == regular, "NULL restores the default instance");
+    copy = TTF_CopyFont(font);
+    check(copy != NULL && TTF_GetFontWeight(copy) == 400 && Coverage(copy, "Hello") == regular, "a copy of a restored font is at the default instance");
+    TTF_CloseFont(copy);
 
     // Named instance 2 of Cantarell is Light 300
     SDL_PropertiesID props = SDL_CreateProperties();
@@ -112,8 +123,24 @@ int main(int argc, char **argv)
     SDL_DestroyProperties(props);
     check(instance != NULL, "open named instance 2");
     if (instance) {
+        // Stock SDL_ttf reads the weight of a named instance from the OS/2 table, which holds the default instance's
+        int opened_weight = TTF_GetFontWeight(instance);
         check(XDL_SetFontVariations(instance, NULL), "XDL_SetFontVariations(NULL) on a named instance");
         check(TTF_GetFontWeight(instance) == 300, "NULL restores the named instance");
+        Uint64 instance_coverage = Coverage(instance, "Hello");
+        copy = TTF_CopyFont(instance);
+        check(copy != NULL && TTF_GetFontWeight(copy) == 300 && Coverage(copy, "Hello") == instance_coverage, "a copy of a named instance keeps its weight");
+        TTF_CloseFont(copy);
+
+        // A copy at another face number is that face, not the original's values
+        check(XDL_SetFontVariations(font, "wght=600"), "XDL_SetFontVariations(\"wght=600\") before a copy at another face");
+        props = SDL_CreateProperties();
+        SDL_SetPointerProperty(props, TTF_PROP_FONT_CREATE_EXISTING_FONT, font);
+        SDL_SetNumberProperty(props, TTF_PROP_FONT_CREATE_FACE_NUMBER, 2 << 16);
+        copy = TTF_OpenFontWithProperties(props);
+        SDL_DestroyProperties(props);
+        check(copy != NULL && TTF_GetFontWeight(copy) == opened_weight && Coverage(copy, "Hello") == instance_coverage, "a copy at another named instance is that instance as opened");
+        TTF_CloseFont(copy);
         TTF_CloseFont(instance);
     }
 
