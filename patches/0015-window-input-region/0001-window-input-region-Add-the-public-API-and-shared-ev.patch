@@ -15,7 +15,7 @@ Subject: [PATCH] window-input-region: Add the public API and shared event code
  8 files changed, 198 insertions(+), 2 deletions(-)
 
 diff --git a/include/XDL/XDL.h b/include/XDL/XDL.h
-index 63a0f4ccb6675b464e1be7ccafa76a3ca0923634..2b188ac5636a17b195cdb21f59443445407257c3 100644
+index 63a0f4ccb6675b464e1be7ccafa76a3ca0923634..bd444d28e287cb8d5b4d771904f15b8e6899bf3e 100644
 --- a/include/XDL/XDL.h
 +++ b/include/XDL/XDL.h
 @@ -64,6 +64,9 @@ extern "C" {
@@ -85,7 +85,7 @@ index 63a0f4ccb6675b464e1be7ccafa76a3ca0923634..2b188ac5636a17b195cdb21f59443445
 + *
 + * \threadsafety This function should only be called on the main thread.
 + *
-+ * \since This function is available since XDL 3.4.20-9.
++ * \since This function is available since XDL 3.4.20-10.
 + *
 + * \sa SDL_SetWindowShape
 + * \sa XDL_SetWindowMousePassthroughEvents
