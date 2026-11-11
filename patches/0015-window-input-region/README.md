@@ -20,7 +20,6 @@ The code comes from botoddly/SDL#4, which replaced mouse passthrough events with
 
 ## Known gaps
 
-- Only Wayland and X11 were run. Windows was compiled with `zig cc`, and macOS only by CI.
 - On Windows, where the regions of several windows overlap, which one takes a press does not depend on their stacking order.
 - Windows silently removes a low-level mouse hook that keeps missing its timeout. The region then stops taking input, and the app is not told.
 
