@@ -8,7 +8,6 @@ A maximized window, a window without a hit test and the resize hit test results 
 
 ## Known gaps
 
-- Only compiled, with mingw-w64. It has not been run on Windows.
 - The drag has no Aero Snap and no shake to minimise, and Escape does not cancel it.
 - A resizable window dragged onto a display of another DPI takes the size Windows suggests, but the cursor keeps its offset in the old pixels, so it can end up outside the window. A window that is not resizable keeps its size.
 - Pen and touch drags have not been tried.
