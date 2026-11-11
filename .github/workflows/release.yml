@@ -1,10 +1,8 @@
 name: Release
 
-# Publishes XDL_VERSION as the GitHub release v<XDL_VERSION> when that tag does not exist yet. Merging a pull request that raises
-# XDL_VERSION releases it. A failed release is run again by hand.
+# Publishes the next version as the GitHub release v<version> when started by hand. tools/next-version.sh finds the version from the
+# existing release tags, and fails when nothing changed since the newest one. A failed release is run again by hand.
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -20,32 +18,30 @@ jobs:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     outputs:
-      tag: ${{ steps.tag.outputs.tag }}
+      version: ${{ steps.version.outputs.version }}
 
     steps:
-      # A shallow checkout has no tags, so every push would look unreleased.
+      # A shallow checkout has no tags, so every version would look unreleased.
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Find the tag
-        id: tag
+      # The SDL version comes from SDL_version.h in the pinned commit.
+      - name: Fetch SDL
+        run: git submodule update --init --depth 1 external/SDL
+
+      - name: Find the version
+        id: version
         run: |
-          tag="v$(cat XDL_VERSION)"
-          if git rev-parse --verify --quiet "refs/tags/$tag" > /dev/null; then
-            # A change since the tag would never be released, as when two pull requests raised XDL_VERSION to the same value.
-            tools/check-version.sh "$tag"
-          else
-            # Fails on a malformed XDL_VERSION. With HEAD as the base, no release input counts as changed.
-            tools/check-version.sh HEAD
-            echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          fi
+          version=$(tools/next-version.sh)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
 
   build:
     needs: resolve
-    if: needs.resolve.outputs.tag != ''
     uses: ./.github/workflows/build.yml
+    with:
+      version: ${{ needs.resolve.outputs.version }}
 
   publish:
     needs: [resolve, build]
@@ -54,7 +50,7 @@ jobs:
       contents: write
     env:
       GH_TOKEN: ${{ github.token }}
-      TAG: ${{ needs.resolve.outputs.tag }}
+      TAG: v${{ needs.resolve.outputs.version }}
       EMSCRIPTEN_VERSION: ${{ needs.build.outputs.emscripten-version }}
 
     steps:
