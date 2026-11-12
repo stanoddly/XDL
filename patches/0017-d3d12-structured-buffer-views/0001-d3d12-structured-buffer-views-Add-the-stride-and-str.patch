@@ -1,0 +1,157 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: botoddly <250804054+botoddly@users.noreply.github.com>
+Date: Thu, 12 Nov 2026 15:13:36 +0100
+Subject: [PATCH] d3d12-structured-buffer-views: Add the stride and structured
+ slot properties and pass a buffer's stride to its driver
+
+---
+ include/XDL/XDL.h               | 48 +++++++++++++++++++++++++++++++++
+ src/gpu/SDL_gpu.c               |  7 +++++
+ src/gpu/SDL_sysgpu.h            |  1 +
+ src/gpu/d3d12/SDL_gpu_d3d12.c   |  1 +
+ src/gpu/metal/SDL_gpu_metal.m   |  1 +
+ src/gpu/vulkan/SDL_gpu_vulkan.c |  1 +
+ src/gpu/webgpu/SDL_gpu_webgpu.c |  1 +
+ 7 files changed, 60 insertions(+)
+
+diff --git a/include/XDL/XDL.h b/include/XDL/XDL.h
+index bd444d28e287cb8d5b4d771904f15b8e6899bf3e..ff57ccf69c1cbdd0d97224ca58ed76bead163b93 100644
+--- a/include/XDL/XDL.h
++++ b/include/XDL/XDL.h
+@@ -182,6 +182,54 @@ extern SDL_DECLSPEC bool SDLCALL XDL_SetWindowInputRegion(SDL_Window *window, co
+  */
+ #define XDL_PROP_GPU_DEVICE_CREATE_WEBGPU_BINDGROUP_EXPIRE_AFTER_N_SUBMITS "XDL.gpu.device.create.webgpu.bindgroupexpiry"
+ 
++/**
++ * The property for SDL_CreateGPUBuffer() that gives the size in bytes of one
++ * element of a storage buffer, for a shader that reads or writes it as a
++ * StructuredBuffer or RWStructuredBuffer.
++ *
++ * Direct3D 12 takes a structured buffer's stride from the buffer's view, so
++ * with this property the Direct3D 12 driver also creates structured views of
++ * the buffer. A shader slot that XDL_PROP_GPU_SHADER_CREATE_STRUCTURED_STORAGE_BUFFERS_NUMBER
++ * or the compute pipeline properties below mark as structured then reads
++ * the buffer through them. Without it, such a slot reads the buffer through a
++ * raw view, which some Direct3D 12 drivers read as if every index were 0.
++ *
++ * The Direct3D 12 driver creates the structured views only for a stride that
++ * is a multiple of 4 and at most 2048 bytes, and a buffer of at least one
++ * element. Other drivers ignore this property.
++ *
++ * \since This macro is available since XDL 3.4.20-14.
++ */
++#define XDL_PROP_GPU_BUFFER_CREATE_STRIDE_NUMBER "XDL.gpu.buffer.create.stride"
++
++/**
++ * The property for SDL_CreateGPUShader() that marks which storage buffer
++ * slots the shader declares as StructuredBuffer: bit i set means slot i. A
++ * clear bit means a ByteAddressBuffer. Only the low 8 bits are used.
++ *
++ * Other drivers than Direct3D 12 ignore this property.
++ *
++ * \since This macro is available since XDL 3.4.20-14.
++ *
++ * \sa XDL_PROP_GPU_BUFFER_CREATE_STRIDE_NUMBER
++ */
++#define XDL_PROP_GPU_SHADER_CREATE_STRUCTURED_STORAGE_BUFFERS_NUMBER "XDL.gpu.shader.create.structuredstoragebuffers"
++
++/**
++ * The properties for SDL_CreateGPUComputePipeline() that mark which read-only
++ * storage buffer slots the shader declares as StructuredBuffer, and which
++ * read-write storage buffer slots it declares as RWStructuredBuffer: bit i
++ * set means slot i. Only the low 8 bits are used.
++ *
++ * Other drivers than Direct3D 12 ignore these properties.
++ *
++ * \since These macros are available since XDL 3.4.20-14.
++ *
++ * \sa XDL_PROP_GPU_BUFFER_CREATE_STRIDE_NUMBER
++ */
++#define XDL_PROP_GPU_COMPUTEPIPELINE_CREATE_STRUCTURED_READONLY_STORAGE_BUFFERS_NUMBER  "XDL.gpu.computepipeline.create.structuredreadonlystoragebuffers"
++#define XDL_PROP_GPU_COMPUTEPIPELINE_CREATE_STRUCTURED_READWRITE_STORAGE_BUFFERS_NUMBER "XDL.gpu.computepipeline.create.structuredreadwritestoragebuffers"
++
+ #ifdef __cplusplus
+ }
+ #endif
+diff --git a/src/gpu/SDL_gpu.c b/src/gpu/SDL_gpu.c
+index 9d5bff6fc24f484c50ff6146767abe0949775f2b..736fdf2b89a29ecc5c0c98ab6dfcdf074759cf13 100644
+--- a/src/gpu/SDL_gpu.c
++++ b/src/gpu/SDL_gpu.c
+@@ -1401,10 +1401,17 @@ SDL_GPUBuffer *SDL_CreateGPUBuffer(
+ 
+     const char *debugName = SDL_GetStringProperty(createinfo->props, SDL_PROP_GPU_BUFFER_CREATE_NAME_STRING, NULL);
+ 
++    // A stride that does not fit a Uint32 cannot be valid, so it is passed as 0, no stride.
++    Sint64 stride = SDL_GetNumberProperty(createinfo->props, XDL_PROP_GPU_BUFFER_CREATE_STRIDE_NUMBER, 0);
++    if (stride < 0 || stride > SDL_MAX_UINT32) {
++        stride = 0;
++    }
++
+     return device->CreateBuffer(
+         device->driverData,
+         createinfo->usage,
+         createinfo->size,
++        (Uint32)stride,
+         debugName);
+ }
+ 
+diff --git a/src/gpu/SDL_sysgpu.h b/src/gpu/SDL_sysgpu.h
+index 3957aeb8c11610dfb4799c24110844108b657243..3e3a67ef6a2f34999eada01667c799ee101e047e 100644
+--- a/src/gpu/SDL_sysgpu.h
++++ b/src/gpu/SDL_sysgpu.h
+@@ -702,6 +702,7 @@ struct SDL_GPUDevice
+         SDL_GPURenderer *driverData,
+         SDL_GPUBufferUsageFlags usageFlags,
+         Uint32 size,
++        Uint32 stride,
+         const char *debugName);
+ 
+     SDL_GPUTransferBuffer *(*CreateTransferBuffer)(
+diff --git a/src/gpu/d3d12/SDL_gpu_d3d12.c b/src/gpu/d3d12/SDL_gpu_d3d12.c
+index 61e1b2397baf45396f192e493354209157fae216..42e39fd2e5cc3673afe76f2ac9d3d5ce66e7461c 100644
+--- a/src/gpu/d3d12/SDL_gpu_d3d12.c
++++ b/src/gpu/d3d12/SDL_gpu_d3d12.c
+@@ -4051,6 +4051,7 @@ static SDL_GPUBuffer *D3D12_CreateBuffer(
+     SDL_GPURenderer *driverData,
+     SDL_GPUBufferUsageFlags usageFlags,
+     Uint32 size,
++    Uint32 stride,
+     const char *debugName)
+ {
+     return (SDL_GPUBuffer *)D3D12_INTERNAL_CreateBufferContainer(
+diff --git a/src/gpu/metal/SDL_gpu_metal.m b/src/gpu/metal/SDL_gpu_metal.m
+index c42b2bce642550eab3a178710e451ef8c555d24c..3c8333ae34d1f7b41a891569f4bec23886b1ee03 100644
+--- a/src/gpu/metal/SDL_gpu_metal.m
++++ b/src/gpu/metal/SDL_gpu_metal.m
+@@ -1660,6 +1660,7 @@ static SDL_GPUBuffer *METAL_CreateBuffer(
+     SDL_GPURenderer *driverData,
+     SDL_GPUBufferUsageFlags usage,
+     Uint32 size,
++    Uint32 stride,
+     const char *debugName)
+ {
+     @autoreleasepool {
+diff --git a/src/gpu/vulkan/SDL_gpu_vulkan.c b/src/gpu/vulkan/SDL_gpu_vulkan.c
+index 5a97bbd9f57a21a3105800a7862613d83aef702b..b73225c515b674da169c4f94be646dead16e1f2e 100644
+--- a/src/gpu/vulkan/SDL_gpu_vulkan.c
++++ b/src/gpu/vulkan/SDL_gpu_vulkan.c
+@@ -7000,6 +7000,7 @@ static SDL_GPUBuffer *VULKAN_CreateBuffer(
+     SDL_GPURenderer *driverData,
+     SDL_GPUBufferUsageFlags usageFlags,
+     Uint32 size,
++    Uint32 stride,
+     const char *debugName)
+ {
+     return (SDL_GPUBuffer *)VULKAN_INTERNAL_CreateBufferContainer(
+diff --git a/src/gpu/webgpu/SDL_gpu_webgpu.c b/src/gpu/webgpu/SDL_gpu_webgpu.c
+index cc9300bb41f335428cb801e750ddde55f27b357a..e955e30530174250083825be1991f3da4ffdf6e5 100644
+--- a/src/gpu/webgpu/SDL_gpu_webgpu.c
++++ b/src/gpu/webgpu/SDL_gpu_webgpu.c
+@@ -4665,6 +4665,7 @@ static SDL_GPUBuffer *WEBGPU_CreateBuffer(
+     SDL_GPURenderer *driverData,
+     SDL_GPUBufferUsageFlags usageFlags,
+     Uint32 size,
++    Uint32 stride,
+     const char *debugName)
+ {
+     // #15981
