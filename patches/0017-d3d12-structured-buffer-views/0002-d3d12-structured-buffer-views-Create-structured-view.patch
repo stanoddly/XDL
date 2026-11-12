@@ -5,11 +5,11 @@ Subject: [PATCH] d3d12-structured-buffer-views: Create structured views of a
  buffer with a stride and bind them to structured slots
 
 ---
- src/gpu/d3d12/SDL_gpu_d3d12.c | 184 ++++++++++++++++++++++++++++++----
- 1 file changed, 163 insertions(+), 21 deletions(-)
+ src/gpu/d3d12/SDL_gpu_d3d12.c | 189 ++++++++++++++++++++++++++++++----
+ 1 file changed, 168 insertions(+), 21 deletions(-)
 
 diff --git a/src/gpu/d3d12/SDL_gpu_d3d12.c b/src/gpu/d3d12/SDL_gpu_d3d12.c
-index 42e39fd2e5cc3673afe76f2ac9d3d5ce66e7461c..2b4815e0262923a2f00e194f3e1a25d4321f6f6e 100644
+index 42e39fd2e5cc3673afe76f2ac9d3d5ce66e7461c..9b4598fbd95f2fda857b617eb11d1dabbaa72a42 100644
 --- a/src/gpu/d3d12/SDL_gpu_d3d12.c
 +++ b/src/gpu/d3d12/SDL_gpu_d3d12.c
 @@ -30,6 +30,7 @@
@@ -83,29 +83,27 @@ index 42e39fd2e5cc3673afe76f2ac9d3d5ce66e7461c..2b4815e0262923a2f00e194f3e1a25d4
      SDL_AtomicInt referenceCount;
  };
  
-@@ -1202,6 +1212,9 @@ struct D3D12Buffer
+@@ -1202,6 +1212,12 @@ struct D3D12Buffer
      D3D12StagingDescriptor uavDescriptor;
      D3D12StagingDescriptor srvDescriptor;
      D3D12StagingDescriptor cbvDescriptor;
 +    // Structured views of a buffer created with a valid stride, beside the raw ones; their heap is NULL otherwise.
 +    D3D12StagingDescriptor structuredUavDescriptor;
 +    D3D12StagingDescriptor structuredSrvDescriptor;
++    // Set once a structured slot accessed the buffer through a raw view and the warning was logged. It is on the buffer, not
++    // its container, because a released container is freed at once while a command buffer can still hold the buffer.
++    SDL_AtomicInt warnedRawStructuredAccess;
      D3D12_GPU_VIRTUAL_ADDRESS virtualAddress;
      Uint8 *mapPointer; // NULL except for upload buffers and fast uniform buffers
      SDL_AtomicInt referenceCount;
-@@ -1212,8 +1225,12 @@ struct D3D12BufferContainer
+@@ -1212,6 +1228,7 @@ struct D3D12BufferContainer
  {
      BufferCommonHeader header;
      Uint32 size;
 +    Uint32 stride;
      D3D12BufferType type;
  
-+    // Set once a structured slot read the buffer through a raw view and the warning was logged.
-+    SDL_AtomicInt warnedRawStructuredAccess;
-+
      D3D12Buffer *activeBuffer;
- 
-     D3D12Buffer **buffers;
 @@ -1354,6 +1371,10 @@ static void D3D12_INTERNAL_DestroyBuffer(
          &buffer->uavDescriptor);
      D3D12_INTERNAL_ReleaseStagingDescriptorHandle(
@@ -117,20 +115,25 @@ index 42e39fd2e5cc3673afe76f2ac9d3d5ce66e7461c..2b4815e0262923a2f00e194f3e1a25d4
  
      if (buffer->handle) {
          ID3D12Resource_Release(buffer->handle);
-@@ -2967,6 +2988,12 @@ static D3D12ComputeRootSignature *D3D12_INTERNAL_CreateComputeRootSignature(
+@@ -2967,6 +2988,17 @@ static D3D12ComputeRootSignature *D3D12_INTERNAL_CreateComputeRootSignature(
      return d3d12ComputeRootSignature;
  }
  
-+// The storage buffer slots a property marks as structured, one bit per slot.
++// The storage buffer slots a property marks as structured, one bit per slot. A negative value marks none.
 +static Uint32 D3D12_INTERNAL_GetStructuredSlots(SDL_PropertiesID props, const char *name)
 +{
-+    return (Uint32)SDL_GetNumberProperty(props, name, 0) & ((1u << MAX_STORAGE_BUFFERS_PER_STAGE) - 1);
++    Sint64 slots = SDL_GetNumberProperty(props, name, 0);
++    if (slots < 0) {
++        return 0;
++    }
++
++    return (Uint32)(slots & ((1u << MAX_STORAGE_BUFFERS_PER_STAGE) - 1));
 +}
 +
  static SDL_GPUComputePipeline *D3D12_CreateComputePipeline(
      SDL_GPURenderer *driverData,
      const SDL_GPUComputePipelineCreateInfo *createinfo)
-@@ -3028,6 +3055,12 @@ static SDL_GPUComputePipeline *D3D12_CreateComputePipeline(
+@@ -3028,6 +3060,12 @@ static SDL_GPUComputePipeline *D3D12_CreateComputePipeline(
      computePipeline->header.numReadWriteStorageTextures = createinfo->num_readwrite_storage_textures;
      computePipeline->header.numReadWriteStorageBuffers = createinfo->num_readwrite_storage_buffers;
      computePipeline->header.numUniformBuffers = createinfo->num_uniform_buffers;
@@ -143,7 +146,7 @@ index 42e39fd2e5cc3673afe76f2ac9d3d5ce66e7461c..2b4815e0262923a2f00e194f3e1a25d4
      SDL_SetAtomicInt(&computePipeline->referenceCount, 0);
  
      if (renderer->debug_mode && SDL_HasProperty(createinfo->props, SDL_PROP_GPU_COMPUTEPIPELINE_CREATE_NAME_STRING)) {
-@@ -3322,11 +3355,13 @@ static SDL_GPUGraphicsPipeline *D3D12_CreateGraphicsPipeline(
+@@ -3322,11 +3360,13 @@ static SDL_GPUGraphicsPipeline *D3D12_CreateGraphicsPipeline(
      pipeline->header.num_vertex_storage_textures = vertShader->numStorageTextures;
      pipeline->header.num_vertex_storage_buffers = vertShader->numStorageBuffers;
      pipeline->header.num_vertex_uniform_buffers = vertShader->numUniformBuffers;
@@ -157,7 +160,7 @@ index 42e39fd2e5cc3673afe76f2ac9d3d5ce66e7461c..2b4815e0262923a2f00e194f3e1a25d4
  
      SDL_SetAtomicInt(&pipeline->referenceCount, 0);
  
-@@ -3416,6 +3451,9 @@ static SDL_GPUShader *D3D12_CreateShader(
+@@ -3416,6 +3456,9 @@ static SDL_GPUShader *D3D12_CreateShader(
      shader->numStorageBuffers = createinfo->num_storage_buffers;
      shader->numStorageTextures = createinfo->num_storage_textures;
      shader->numUniformBuffers = createinfo->num_uniform_buffers;
@@ -167,7 +170,7 @@ index 42e39fd2e5cc3673afe76f2ac9d3d5ce66e7461c..2b4815e0262923a2f00e194f3e1a25d4
  
      shader->bytecode = bytecode;
      shader->bytecodeSize = bytecodeSize;
-@@ -3790,10 +3828,20 @@ static SDL_GPUTexture *D3D12_CreateTexture(
+@@ -3790,10 +3833,20 @@ static SDL_GPUTexture *D3D12_CreateTexture(
      return (SDL_GPUTexture *)container;
  }
  
@@ -188,7 +191,7 @@ index 42e39fd2e5cc3673afe76f2ac9d3d5ce66e7461c..2b4815e0262923a2f00e194f3e1a25d4
      D3D12BufferType type,
      const char *debugName)
  {
-@@ -3894,6 +3942,8 @@ static D3D12Buffer *D3D12_INTERNAL_CreateBuffer(
+@@ -3894,6 +3947,8 @@ static D3D12Buffer *D3D12_INTERNAL_CreateBuffer(
      buffer->uavDescriptor.heap = NULL;
      buffer->srvDescriptor.heap = NULL;
      buffer->cbvDescriptor.heap = NULL;
@@ -197,7 +200,7 @@ index 42e39fd2e5cc3673afe76f2ac9d3d5ce66e7461c..2b4815e0262923a2f00e194f3e1a25d4
  
      if (usageFlags & SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE) {
          D3D12_INTERNAL_AssignStagingDescriptorHandle(
-@@ -3916,6 +3966,25 @@ static D3D12Buffer *D3D12_INTERNAL_CreateBuffer(
+@@ -3916,6 +3971,25 @@ static D3D12Buffer *D3D12_INTERNAL_CreateBuffer(
              NULL, // TODO: support counters?
              &uavDesc,
              buffer->uavDescriptor.cpuHandle);
@@ -223,7 +226,7 @@ index 42e39fd2e5cc3673afe76f2ac9d3d5ce66e7461c..2b4815e0262923a2f00e194f3e1a25d4
      }
  
      if (
-@@ -3940,6 +4009,24 @@ static D3D12Buffer *D3D12_INTERNAL_CreateBuffer(
+@@ -3940,6 +4014,24 @@ static D3D12Buffer *D3D12_INTERNAL_CreateBuffer(
              handle,
              &srvDesc,
              buffer->srvDescriptor.cpuHandle);
@@ -248,7 +251,7 @@ index 42e39fd2e5cc3673afe76f2ac9d3d5ce66e7461c..2b4815e0262923a2f00e194f3e1a25d4
      }
  
      // FIXME: we may not need a CBV since we use root descriptors
-@@ -3997,6 +4084,7 @@ static D3D12BufferContainer *D3D12_INTERNAL_CreateBufferContainer(
+@@ -3997,6 +4089,7 @@ static D3D12BufferContainer *D3D12_INTERNAL_CreateBufferContainer(
      D3D12Renderer *renderer,
      SDL_GPUBufferUsageFlags usageFlags,
      Uint32 size,
@@ -256,7 +259,7 @@ index 42e39fd2e5cc3673afe76f2ac9d3d5ce66e7461c..2b4815e0262923a2f00e194f3e1a25d4
      D3D12BufferType type,
      const char *debugName)
  {
-@@ -4010,6 +4098,7 @@ static D3D12BufferContainer *D3D12_INTERNAL_CreateBufferContainer(
+@@ -4010,6 +4103,7 @@ static D3D12BufferContainer *D3D12_INTERNAL_CreateBufferContainer(
  
      container->header.usage = usageFlags;
      container->size = size;
@@ -264,7 +267,7 @@ index 42e39fd2e5cc3673afe76f2ac9d3d5ce66e7461c..2b4815e0262923a2f00e194f3e1a25d4
      container->type = type;
  
      container->bufferCapacity = 1;
-@@ -4026,6 +4115,7 @@ static D3D12BufferContainer *D3D12_INTERNAL_CreateBufferContainer(
+@@ -4026,6 +4120,7 @@ static D3D12BufferContainer *D3D12_INTERNAL_CreateBufferContainer(
          renderer,
          usageFlags,
          size,
@@ -272,7 +275,7 @@ index 42e39fd2e5cc3673afe76f2ac9d3d5ce66e7461c..2b4815e0262923a2f00e194f3e1a25d4
          type,
          debugName);
  
-@@ -4058,6 +4148,7 @@ static SDL_GPUBuffer *D3D12_CreateBuffer(
+@@ -4058,6 +4153,7 @@ static SDL_GPUBuffer *D3D12_CreateBuffer(
          (D3D12Renderer *)driverData,
          usageFlags,
          size,
@@ -280,7 +283,7 @@ index 42e39fd2e5cc3673afe76f2ac9d3d5ce66e7461c..2b4815e0262923a2f00e194f3e1a25d4
          D3D12_BUFFER_TYPE_GPU,
          debugName);
  }
-@@ -4072,6 +4163,7 @@ static SDL_GPUTransferBuffer *D3D12_CreateTransferBuffer(
+@@ -4072,6 +4168,7 @@ static SDL_GPUTransferBuffer *D3D12_CreateTransferBuffer(
          (D3D12Renderer *)driverData,
          0,
          size,
@@ -288,7 +291,7 @@ index 42e39fd2e5cc3673afe76f2ac9d3d5ce66e7461c..2b4815e0262923a2f00e194f3e1a25d4
          usage == SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD ? D3D12_BUFFER_TYPE_UPLOAD : D3D12_BUFFER_TYPE_DOWNLOAD,
          debugName);
  }
-@@ -4366,6 +4458,7 @@ static void D3D12_INTERNAL_CycleActiveBuffer(
+@@ -4366,6 +4463,7 @@ static void D3D12_INTERNAL_CycleActiveBuffer(
          renderer,
          container->header.usage,
          container->size,
@@ -296,7 +299,7 @@ index 42e39fd2e5cc3673afe76f2ac9d3d5ce66e7461c..2b4815e0262923a2f00e194f3e1a25d4
          container->type,
          container->debugName);
  
-@@ -4641,6 +4734,7 @@ static D3D12UniformBuffer *D3D12_INTERNAL_AcquireUniformBufferFromPool(
+@@ -4641,6 +4739,7 @@ static D3D12UniformBuffer *D3D12_INTERNAL_AcquireUniformBufferFromPool(
              renderer,
              0,
              UNIFORM_BUFFER_SIZE,
@@ -304,7 +307,7 @@ index 42e39fd2e5cc3673afe76f2ac9d3d5ce66e7461c..2b4815e0262923a2f00e194f3e1a25d4
              D3D12_BUFFER_TYPE_UNIFORM,
              NULL);
          if (!uniformBuffer->buffer) {
-@@ -4916,12 +5010,12 @@ static void D3D12_BindVertexStorageBuffers(
+@@ -4916,12 +5015,12 @@ static void D3D12_BindVertexStorageBuffers(
  
      for (Uint32 i = 0; i < numBindings; i += 1) {
          D3D12BufferContainer *container = (D3D12BufferContainer *)storageBuffers[i];
@@ -319,7 +322,7 @@ index 42e39fd2e5cc3673afe76f2ac9d3d5ce66e7461c..2b4815e0262923a2f00e194f3e1a25d4
              d3d12CommandBuffer->needVertexStorageBufferBind = true;
          }
      }
-@@ -4991,12 +5085,12 @@ static void D3D12_BindFragmentStorageBuffers(
+@@ -4991,12 +5090,12 @@ static void D3D12_BindFragmentStorageBuffers(
      for (Uint32 i = 0; i < numBindings; i += 1) {
          D3D12BufferContainer *container = (D3D12BufferContainer *)storageBuffers[i];
  
@@ -334,13 +337,13 @@ index 42e39fd2e5cc3673afe76f2ac9d3d5ce66e7461c..2b4815e0262923a2f00e194f3e1a25d4
              d3d12CommandBuffer->needFragmentStorageBufferBind = true;
          }
      }
-@@ -5055,6 +5149,38 @@ static void D3D12_INTERNAL_SetGPUDescriptorHeaps(D3D12CommandBuffer *commandBuff
+@@ -5055,6 +5154,38 @@ static void D3D12_INTERNAL_SetGPUDescriptorHeaps(D3D12CommandBuffer *commandBuff
          heaps);
  }
  
 +/* The descriptor of a storage buffer slot: the buffer's structured view when the shader declares the slot structured, otherwise its raw view.
-+ * Direct3D 12 takes a structured buffer's stride from its view, so a structured slot read through the raw view, whose stride is 0, reads wrong elements on some drivers.
-+ * A buffer without a structured view, created without XDL_PROP_GPU_BUFFER_CREATE_STRIDE_NUMBER, keeps that behavior, and the first such read logs a warning.
++ * Direct3D 12 takes a structured buffer's stride from its view, so a structured slot accessed through the raw view, whose stride is 0, accesses wrong elements on some drivers.
++ * A buffer without a structured view, created without a valid XDL_PROP_GPU_BUFFER_CREATE_STRIDE_NUMBER, keeps that behavior, and the first such access logs a warning.
 + * An unbound slot gets a zero handle, which D3D12_INTERNAL_WriteGPUDescriptors skips. */
 +static D3D12_CPU_DESCRIPTOR_HANDLE D3D12_INTERNAL_GetStorageBufferDescriptor(
 +    D3D12Buffer *buffer,
@@ -360,10 +363,10 @@ index 42e39fd2e5cc3673afe76f2ac9d3d5ce66e7461c..2b4815e0262923a2f00e194f3e1a25d4
 +            return structured->cpuHandle;
 +        }
 +
-+        if (SDL_CompareAndSwapAtomicInt(&buffer->container->warnedRawStructuredAccess, 0, 1)) {
++        if (SDL_CompareAndSwapAtomicInt(&buffer->warnedRawStructuredAccess, 0, 1)) {
 +            SDL_LogWarn(
 +                SDL_LOG_CATEGORY_GPU,
-+                "A structured storage buffer slot is bound to a buffer without a structured view, so it reads the raw view. Create the buffer with XDL_PROP_GPU_BUFFER_CREATE_STRIDE_NUMBER, a multiple of 4 up to 2048.");
++                "A structured storage buffer slot is bound to a buffer without a structured view, so it accesses the raw view. Create the buffer with XDL_PROP_GPU_BUFFER_CREATE_STRIDE_NUMBER: a multiple of 4, at most 2048 and at most the buffer's size.");
 +        }
 +    }
 +
@@ -373,7 +376,7 @@ index 42e39fd2e5cc3673afe76f2ac9d3d5ce66e7461c..2b4815e0262923a2f00e194f3e1a25d4
  static void D3D12_INTERNAL_WriteGPUDescriptors(
      D3D12CommandBuffer *commandBuffer,
      D3D12_DESCRIPTOR_HEAP_TYPE heapType,
-@@ -5184,7 +5310,11 @@ static void D3D12_INTERNAL_BindGraphicsResources(
+@@ -5184,7 +5315,11 @@ static void D3D12_INTERNAL_BindGraphicsResources(
      if (commandBuffer->needVertexStorageBufferBind) {
          if (graphicsPipeline->header.num_vertex_storage_buffers > 0) {
              for (Uint32 i = 0; i < graphicsPipeline->header.num_vertex_storage_buffers; i += 1) {
@@ -386,7 +389,7 @@ index 42e39fd2e5cc3673afe76f2ac9d3d5ce66e7461c..2b4815e0262923a2f00e194f3e1a25d4
              }
  
              D3D12_INTERNAL_WriteGPUDescriptors(
-@@ -5275,7 +5405,11 @@ static void D3D12_INTERNAL_BindGraphicsResources(
+@@ -5275,7 +5410,11 @@ static void D3D12_INTERNAL_BindGraphicsResources(
      if (commandBuffer->needFragmentStorageBufferBind) {
          if (graphicsPipeline->header.num_fragment_storage_buffers > 0) {
              for (Uint32 i = 0; i < graphicsPipeline->header.num_fragment_storage_buffers; i += 1) {
@@ -399,7 +402,7 @@ index 42e39fd2e5cc3673afe76f2ac9d3d5ce66e7461c..2b4815e0262923a2f00e194f3e1a25d4
              }
  
              D3D12_INTERNAL_WriteGPUDescriptors(
-@@ -5463,12 +5597,12 @@ static void D3D12_EndRenderPass(
+@@ -5463,12 +5602,12 @@ static void D3D12_EndRenderPass(
      SDL_zeroa(d3d12CommandBuffer->vertexSamplerTextureDescriptorHandles);
      SDL_zeroa(d3d12CommandBuffer->vertexSamplerDescriptorHandles);
      SDL_zeroa(d3d12CommandBuffer->vertexStorageTextureDescriptorHandles);
@@ -414,7 +417,7 @@ index 42e39fd2e5cc3673afe76f2ac9d3d5ce66e7461c..2b4815e0262923a2f00e194f3e1a25d4
  }
  
  // Compute Pass
-@@ -5521,7 +5655,6 @@ static void D3D12_BeginComputePass(
+@@ -5521,7 +5660,6 @@ static void D3D12_BeginComputePass(
                  D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
  
              d3d12CommandBuffer->computeReadWriteStorageBuffers[i] = buffer;
@@ -422,7 +425,7 @@ index 42e39fd2e5cc3673afe76f2ac9d3d5ce66e7461c..2b4815e0262923a2f00e194f3e1a25d4
  
              D3D12_INTERNAL_TrackBuffer(
                  d3d12CommandBuffer,
-@@ -5593,14 +5726,19 @@ static void D3D12_BindComputePipeline(
+@@ -5593,14 +5731,19 @@ static void D3D12_BindComputePipeline(
  
      if (pipeline->header.numReadWriteStorageBuffers > 0) {
          for (Uint32 i = 0; i < pipeline->header.numReadWriteStorageBuffers; i += 1) {
@@ -444,7 +447,7 @@ index 42e39fd2e5cc3673afe76f2ac9d3d5ce66e7461c..2b4815e0262923a2f00e194f3e1a25d4
              &gpuDescriptorHandle);
  
          ID3D12GraphicsCommandList_SetComputeRootDescriptorTable(
-@@ -5711,7 +5849,6 @@ static void D3D12_BindComputeStorageBuffers(
+@@ -5711,7 +5854,6 @@ static void D3D12_BindComputeStorageBuffers(
                  buffer);
  
              d3d12CommandBuffer->computeReadOnlyStorageBuffers[firstSlot + i] = buffer;
@@ -452,7 +455,7 @@ index 42e39fd2e5cc3673afe76f2ac9d3d5ce66e7461c..2b4815e0262923a2f00e194f3e1a25d4
              d3d12CommandBuffer->needComputeReadOnlyStorageBufferBind = true;
          }
      }
-@@ -5807,7 +5944,11 @@ static void D3D12_INTERNAL_BindComputeResources(
+@@ -5807,7 +5949,11 @@ static void D3D12_INTERNAL_BindComputeResources(
      if (commandBuffer->needComputeReadOnlyStorageBufferBind) {
          if (computePipeline->header.numReadonlyStorageBuffers > 0) {
              for (Uint32 i = 0; i < computePipeline->header.numReadonlyStorageBuffers; i += 1) {
@@ -465,7 +468,7 @@ index 42e39fd2e5cc3673afe76f2ac9d3d5ce66e7461c..2b4815e0262923a2f00e194f3e1a25d4
              }
  
              D3D12_INTERNAL_WriteGPUDescriptors(
-@@ -5930,7 +6071,6 @@ static void D3D12_EndComputePass(
+@@ -5930,7 +6076,6 @@ static void D3D12_EndComputePass(
      SDL_zeroa(d3d12CommandBuffer->computeSamplerDescriptorHandles);
  
      SDL_zeroa(d3d12CommandBuffer->computeReadWriteStorageTextureDescriptorHandles);
@@ -473,7 +476,7 @@ index 42e39fd2e5cc3673afe76f2ac9d3d5ce66e7461c..2b4815e0262923a2f00e194f3e1a25d4
  
      d3d12CommandBuffer->currentComputePipeline = NULL;
  }
-@@ -6085,6 +6225,7 @@ static void D3D12_UploadToTexture(
+@@ -6085,6 +6230,7 @@ static void D3D12_UploadToTexture(
              d3d12CommandBuffer->renderer,
              0,
              alignedBytesPerSlice * destination->d,
@@ -481,7 +484,7 @@ index 42e39fd2e5cc3673afe76f2ac9d3d5ce66e7461c..2b4815e0262923a2f00e194f3e1a25d4
              D3D12_BUFFER_TYPE_UPLOAD,
              NULL);
  
-@@ -6131,6 +6272,7 @@ static void D3D12_UploadToTexture(
+@@ -6131,6 +6277,7 @@ static void D3D12_UploadToTexture(
              d3d12CommandBuffer->renderer,
              0,
              alignedRowPitch * blockHeight * destination->d,
@@ -489,7 +492,7 @@ index 42e39fd2e5cc3673afe76f2ac9d3d5ce66e7461c..2b4815e0262923a2f00e194f3e1a25d4
              D3D12_BUFFER_TYPE_UPLOAD,
              NULL);
  
-@@ -6425,6 +6567,7 @@ static void D3D12_DownloadFromTexture(
+@@ -6425,6 +6572,7 @@ static void D3D12_DownloadFromTexture(
              d3d12CommandBuffer->renderer,
              0,
              alignedRowPitch * rowsPerSlice * source->d,
@@ -497,7 +500,7 @@ index 42e39fd2e5cc3673afe76f2ac9d3d5ce66e7461c..2b4815e0262923a2f00e194f3e1a25d4
              D3D12_BUFFER_TYPE_DOWNLOAD,
              NULL);
  
-@@ -7740,19 +7883,18 @@ static SDL_GPUCommandBuffer *D3D12_AcquireCommandBuffer(
+@@ -7740,19 +7888,18 @@ static SDL_GPUCommandBuffer *D3D12_AcquireCommandBuffer(
      SDL_zeroa(commandBuffer->vertexSamplerTextureDescriptorHandles);
      SDL_zeroa(commandBuffer->vertexSamplerDescriptorHandles);
      SDL_zeroa(commandBuffer->vertexStorageTextureDescriptorHandles);
