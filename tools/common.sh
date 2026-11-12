@@ -66,14 +66,14 @@ read_patches() {
   done
 }
 
-# Sets version to the content of XDL_VERSION, such as 3.4.20-1, sdl_version to its SDL version and suffix to its -N suffix. Only
-# final newlines may follow it, because the release workflow uses the file as it is. No number has a leading zero, which bash
-# arithmetic would read as octal.
-read_version() {
-  version=$(< "$repo_root/XDL_VERSION")
-  [[ "$version" =~ ^((0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*))-([1-9][0-9]*)$ ]] || die "XDL_VERSION must look like 3.4.20-1, not: $version"
-  sdl_version=${BASH_REMATCH[1]}
-  suffix=${BASH_REMATCH[5]}
+# Sets sdl_version, such as 3.4.20, from SDL_version.h in the SDL commit that <revision> pins. An empty <revision> means the index.
+read_sdl_version() {
+  local commit header
+  commit=$(git -C "$repo_root" rev-parse --verify --quiet "$1:external/SDL") || die "${1:-The index} pins no external/SDL."
+  header=$(git -C "$repo_root/external/SDL" show "$commit:include/SDL3/SDL_version.h" 2> /dev/null) \
+    || die "Cannot read SDL_version.h of $commit. Run: git submodule update --init external/SDL"
+  sdl_version=$(awk '$1 == "#define" { value[$2] = $3 } END { print value["SDL_MAJOR_VERSION"] "." value["SDL_MINOR_VERSION"] "." value["SDL_MICRO_VERSION"] }' <<< "$header")
+  [[ "$sdl_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "SDL_version.h of $commit has no version, only: $sdl_version"
 }
 
 am_patches() {

@@ -70,7 +70,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git switch --create "$BRANCH"
-          # update-upstream.sh staged the moved submodules and XDL_VERSION.
+          # update-upstream.sh staged the moved submodules.
           git commit --quiet --message "$TITLE"
           git push origin "$BRANCH"
           gh workflow run build.yml --ref "$BRANCH"

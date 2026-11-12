@@ -323,9 +323,19 @@ upstream_commit() {
   git -C "$1" commit --quiet --allow-empty -m "$2"
   git -C "$1" tag "$2"
 }
+# Commits an SDL_version.h with <version>, laid out as SDL's, and tags it release-<version>.
+sdl_release() {
+  local major minor micro
+  IFS=. read -r major minor micro <<< "$1"
+  mkdir -p "$upstream_sdl/include/SDL3"
+  printf '#define SDL_MAJOR_VERSION   %s\n#define SDL_MINOR_VERSION   %s\n#define SDL_MICRO_VERSION   %s\n' "$major" "$minor" "$micro" \
+    > "$upstream_sdl/include/SDL3/SDL_version.h"
+  git -C "$upstream_sdl" add include
+  upstream_commit "$upstream_sdl" "release-$1"
+}
 git init --quiet "$upstream_sdl"
-upstream_commit "$upstream_sdl" release-3.4.9
-upstream_commit "$upstream_sdl" release-3.4.10
+sdl_release 3.4.9
+sdl_release 3.4.10
 upstream_commit "$upstream_sdl" prerelease-3.5.0
 git init --quiet "$upstream_satellite"
 upstream_commit "$upstream_satellite" release-3.2.2
@@ -336,21 +346,23 @@ cp "$tools_source/../.gitattributes" "$release/"
 git -C "$release" submodule --quiet add "$upstream_sdl" external/SDL
 git -C "$release" submodule --quiet add "$upstream_satellite" external/SDL_fake
 git -C "$release/external/SDL" checkout --quiet release-3.4.9
-echo 3.4.9-1 > "$release/XDL_VERSION"
 git -C "$release" add .
 git -C "$release" commit --quiet -m "Set up"
 update_upstream="$release/tools/update-upstream.sh"
-check_version="$release/tools/check-version.sh"
+next_version="$release/tools/next-version.sh"
+sdl_version="$release/tools/sdl-version.sh"
 
+[[ "$("$sdl_version")" == 3.4.9 ]] || fail "sdl-version: expected 3.4.9"
 summary=$("$update_upstream")
 [[ "$(head -n 1 <<< "$summary")" == "Update to SDL release-3.4.10, SDL_fake release-3.2.2" ]] || fail "update-upstream: unexpected title in: $summary"
 [[ "$(git -C "$release" rev-parse :external/SDL)" == "$(git -C "$upstream_sdl" rev-parse release-3.4.10)" ]] \
   || fail "update-upstream did not move SDL to release-3.4.10"
-[[ "$(git -C "$release" show :XDL_VERSION)" == 3.4.10-1 ]] || fail "update-upstream: XDL_VERSION is not 3.4.10-1 after an SDL release"
-pass "update-upstream moves SDL to its newest release by number, skips prereleases and restarts the suffix"
+[[ "$(git -C "$release" diff --cached --name-only | tr '\n' ' ')" == "external/SDL " ]] || fail "update-upstream staged more than SDL: $(git -C "$release" diff --cached --name-only)"
+pass "update-upstream moves SDL to its newest release by number, skips prereleases and stages only the moved submodule"
+[[ "$("$sdl_version")" == 3.4.10 ]] || fail "sdl-version did not read the SDL that the index pins"
+pass "sdl-version reads SDL_version.h of the SDL that the index pins"
 git -C "$release" commit --quiet -m "Update"
-[[ -z "$("$update_upstream")" ]] && git -C "$release" diff --cached --quiet && git -C "$release" diff --quiet -- XDL_VERSION \
-  || fail "update-upstream changed something with nothing to move"
+[[ -z "$("$update_upstream")" ]] && git -C "$release" diff --cached --quiet || fail "update-upstream changed something with nothing to move"
 pass "update-upstream does nothing when every project is on its newest release"
 
 git -C "$upstream_satellite" commit --quiet --allow-empty -m "Satellite release"
@@ -358,36 +370,51 @@ git -C "$upstream_satellite" tag -a release-3.2.3 -m "Satellite release"
 "$update_upstream" > /dev/null
 [[ "$(git -C "$release" rev-parse :external/SDL_fake)" == "$(git -C "$upstream_satellite" rev-parse 'release-3.2.3^{commit}')" ]] \
   || fail "update-upstream did not move SDL_fake to the commit of an annotated tag"
-[[ "$(git -C "$release" show :XDL_VERSION)" == 3.4.10-2 ]] || fail "update-upstream: XDL_VERSION is not 3.4.10-2 after a satellite release"
-pass "update-upstream raises the suffix for a satellite release and reads annotated tags"
+pass "update-upstream reads annotated tags"
 git -C "$release" commit --quiet -m "Update the satellite"
 
-"$check_version" HEAD~1 > /dev/null
-pass "check-version accepts a version without a tag"
-git -C "$release" tag v3.4.10-2
+[[ "$("$next_version")" == 3.4.10-1 ]] || fail "next-version: expected 3.4.10-1 without a release tag"
+pass "next-version starts at 1 without a release tag"
+git -C "$release" tag v3.4.10-1
+expect_refusal "next-version refuses when nothing changed since the newest release" "Nothing to release: no release input changed since v3.4.10-1." "$next_version"
 echo "notes" > "$release/NOTES.md"
 git -C "$release" add NOTES.md
 git -C "$release" commit --quiet -m "Add notes"
-"$check_version" HEAD~1 > /dev/null
-pass "check-version accepts a change that is not a release input"
+expect_refusal "next-version refuses a change that is not a release input" "Nothing to release" "$next_version"
 mkdir -p "$release/patches-SDL_fake/0001-change"
 echo "change readme" > "$release/patches-SDL_fake/0001-change/README.md"
 git -C "$release" add patches-SDL_fake
 git -C "$release" commit --quiet -m "Add a patch"
-expect_refusal "check-version refuses a released version with changed release inputs" "patches-SDL_fake/0001-change/README.md" "$check_version" v3.4.10-2
-echo 3.4.10-3 > "$release/XDL_VERSION"
-git -C "$release" commit --quiet -am "Raise the version"
-"$check_version" v3.4.10-2 > /dev/null
-pass "check-version accepts the change once the suffix is raised"
-expect_refusal "check-version refuses an unknown revision" "Unknown revision: v9" "$check_version" v9
-printf '3.4.10 -3\n' > "$release/XDL_VERSION"
-expect_refusal "check-version refuses a version with a space inside" "XDL_VERSION must look like 3.4.20-1, not: 3.4.10 -3" "$check_version" HEAD
-printf '3.4.10-08\n' > "$release/XDL_VERSION"
-expect_refusal "check-version refuses a suffix with a leading zero" "XDL_VERSION must look like 3.4.20-1, not: 3.4.10-08" "$check_version" HEAD
-printf '3.4.10-3\n\n' > "$release/XDL_VERSION"
-"$check_version" HEAD > /dev/null
-pass "check-version accepts a version followed by empty lines"
-git -C "$release" checkout --quiet -- XDL_VERSION
+[[ "$("$next_version")" == 3.4.10-2 ]] || fail "next-version: expected 3.4.10-2 after a patch change"
+pass "next-version raises N for a changed release input"
+# By number, so -10 comes after -9. Tags that are not releases do not count.
+git -C "$release" tag v3.4.10-9 HEAD~1
+git -C "$release" tag v3.4.10-10 HEAD~1
+git -C "$release" tag v3.4.10-010 HEAD~1
+git -C "$release" tag v3.4.10-99-rc1 HEAD~1
+[[ "$("$next_version")" == 3.4.10-11 ]] || fail "next-version: expected 3.4.10-11 after v3.4.10-10"
+pass "next-version compares tags by number and ignores tags that are not releases"
+git -C "$release" tag v3.4.10-11
+git -C "$release" tag v3.4.9-5 "$(git -C "$release" rev-list --max-parents=0 HEAD)"
+expect_refusal "next-version finds the newest release across SDL versions by number" "Nothing to release: no release input changed since v3.4.10-11." \
+  "$next_version"
+git -C "$release" checkout --quiet HEAD~1
+expect_refusal "next-version refuses a HEAD behind the newest release" "HEAD does not contain v3.4.10-11." "$next_version"
+git -C "$release" checkout --quiet -
+
+sdl_release 3.4.11
+"$update_upstream" > /dev/null
+git -C "$release" commit --quiet -m "Update SDL"
+expect_refusal "next-version refuses an SDL commit it does not have" "Run: git submodule update --init external/SDL" "$next_version"
+git -C "$release/external/SDL" fetch --quiet origin
+[[ "$("$next_version")" == 3.4.11-1 ]] || fail "next-version: expected 3.4.11-1 after an SDL release"
+pass "next-version starts at 1 for a new SDL release"
+git -C "$release" update-ref refs/heads/scratch-head HEAD
+git -C "$release" rm --quiet --cached external/SDL
+git -C "$release" commit --quiet -m "Drop SDL"
+expect_refusal "next-version refuses a revision without SDL" "HEAD pins no external/SDL." "$next_version"
+git -C "$release" reset --quiet --hard scratch-head
+git -C "$release" update-ref -d refs/heads/scratch-head
 
 collect_runtime="$xdl/tools/collect-runtime.sh"
 prefix=$scratch/prefix

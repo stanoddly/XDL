@@ -5,6 +5,11 @@ on:
   pull_request:
   # Release runs this workflow before it publishes the artifacts.
   workflow_call:
+    inputs:
+      version:
+        description: The version that Release publishes, such as 3.4.20-13.
+        type: string
+        required: true
     outputs:
       emscripten-version:
         description: The Emscripten that built the browser archives.
@@ -56,10 +61,6 @@ jobs:
             echo '```'
           done >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Check that a change to a release raises XDL_VERSION
-        if: ${{ !cancelled() && env.BASE_REVISION != '' }}
-        run: tools/check-version.sh "$BASE_REVISION"
-
   # The archives link only into a .NET runtime built with the same Emscripten, the one of .NET 11's wasm-tools workload. The zip keeps the
   # .NET RID browser-wasm inside, and a later .NET gets a target of its own.
   browser:
@@ -74,11 +75,14 @@ jobs:
         with:
           submodules: true
 
+      # Any build that Release did not start is marked as a development build of its SDL version.
       - name: Set the version and revision
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
         run: |
-          xdl_version=$(cat XDL_VERSION)
-          echo "XDL_VERSION=$xdl_version" >> "$GITHUB_ENV"
-          echo "XDL_REVISION=SDL-${xdl_version%-*}-${GITHUB_SHA::12}" >> "$GITHUB_ENV"
+          sdl_version=$(tools/sdl-version.sh)
+          echo "XDL_VERSION=${RELEASE_VERSION:-$sdl_version-dev}" >> "$GITHUB_ENV"
+          echo "XDL_REVISION=SDL-$sdl_version-${GITHUB_SHA::12}" >> "$GITHUB_ENV"
 
       # tools/emsdk-env.sh uses the Emscripten of this workload.
       - name: Install the .NET 11 preview SDK
@@ -165,11 +169,14 @@ jobs:
         with:
           submodules: true
 
+      # Any build that Release did not start is marked as a development build of its SDL version.
       - name: Set the version and revision
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
         run: |
-          xdl_version=$(cat XDL_VERSION)
-          echo "XDL_VERSION=$xdl_version" >> "$GITHUB_ENV"
-          echo "XDL_REVISION=SDL-${xdl_version%-*}-${GITHUB_SHA::12}" >> "$GITHUB_ENV"
+          sdl_version=$(tools/sdl-version.sh)
+          echo "XDL_VERSION=${RELEASE_VERSION:-$sdl_version-dev}" >> "$GITHUB_ENV"
+          echo "XDL_REVISION=SDL-$sdl_version-${GITHUB_SHA::12}" >> "$GITHUB_ENV"
 
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
