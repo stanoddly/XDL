@@ -1,0 +1,150 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: botoddly <250804054+botoddly@users.noreply.github.com>
+Date: Wed, 11 Nov 2026 14:48:38 +0100
+Subject: [PATCH] windows-hit-test-drag: Move a window dragged by its hit test
+ without the system's modal loop
+
+---
+ src/video/windows/SDL_windowsevents.c | 79 +++++++++++++++++++++++++++
+ src/video/windows/SDL_windowswindow.h |  3 +
+ 2 files changed, 82 insertions(+)
+
+diff --git a/src/video/windows/SDL_windowsevents.c b/src/video/windows/SDL_windowsevents.c
+index 83894ed2198720c318cc9bda11ce19f90b435a92..9118bba685adb0f2074e83f1d47dce8c1d57a1e5 100644
+--- a/src/video/windows/SDL_windowsevents.c
++++ b/src/video/windows/SDL_windowsevents.c
+@@ -1160,6 +1160,64 @@ static bool DispatchModalLoopMessageHook(HWND *hwnd, UINT *msg, WPARAM *wParam,
+     return false;
+ }
+ 
++#if !defined(SDL_PLATFORM_XBOXONE) && !defined(SDL_PLATFORM_XBOXSERIES)
++/* A left press where the hit test answers SDL_HITTEST_DRAGGABLE moves the window here, while the app's event loop keeps
++   running, as it does on the other platforms. Returning HTCAPTION alone would make DefWindowProc run the system's modal move
++   loop, which blocks the event loop until the button is released. A maximized window still goes to DefWindowProc, as in stock SDL. */
++static bool WIN_StartHitTestDrag(SDL_WindowData *data, WPARAM wParam, LPARAM lParam)
++{
++    SDL_Window *window = data->window;
++    POINT press;
++    POINT client;
++    RECT rect;
++    SDL_Point point;
++
++    if (wParam != HTCAPTION || !window->hit_test || IsZoomed(data->hwnd)) {
++        return false;
++    }
++
++    press.x = GET_X_LPARAM(lParam);
++    press.y = GET_Y_LPARAM(lParam);
++    client = press;
++    if (!ScreenToClient(data->hwnd, &client)) {
++        return false;
++    }
++    point.x = client.x;
++    point.y = client.y;
++    if (window->hit_test(window, &point, window->hit_test_data) != SDL_HITTEST_DRAGGABLE) {
++        return false;
++    }
++
++    if (!GetWindowRect(data->hwnd, &rect)) {
++        return false;
++    }
++    // From the press, not the cursor now, so a cursor that moved before this message keeps its place on the window.
++    data->hit_test_drag_offset.x = press.x - rect.left;
++    data->hit_test_drag_offset.y = press.y - rect.top;
++    // Without this, a grabbed cursor could not leave the window's old place.
++    WIN_UnclipCursorForWindow(window);
++    SetCapture(data->hwnd);
++    data->in_hit_test_drag = true;
++    return true;
++}
++
++static void WIN_MoveHitTestDrag(SDL_WindowData *data)
++{
++    POINT cursor;
++
++    // The app or the keyboard can maximize or minimize the window while it is dragged, which ends the drag.
++    if (IsZoomed(data->hwnd) || IsIconic(data->hwnd)) {
++        ReleaseCapture();
++        return;
++    }
++
++    if (GetCursorPos(&cursor)) {
++        SetWindowPos(data->hwnd, NULL, cursor.x - data->hit_test_drag_offset.x, cursor.y - data->hit_test_drag_offset.y, 0, 0,
++                     SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
++    }
++}
++#endif // !defined(SDL_PLATFORM_XBOXONE) && !defined(SDL_PLATFORM_XBOXSERIES)
++
+ LRESULT CALLBACK WIN_WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
+ {
+     SDL_WindowData *data;
+@@ -1447,6 +1505,11 @@ LRESULT CALLBACK WIN_WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
+     {
+         SDL_Window *window = data->window;
+ 
++        if (data->in_hit_test_drag) {
++            WIN_MoveHitTestDrag(data);
++            return 0;
++        }
++
+         if (window->flags & SDL_WINDOW_INPUT_FOCUS) {
+             bool wish_clip_cursor = (
+                 window->flags & (SDL_WINDOW_MOUSE_RELATIVE_MODE | SDL_WINDOW_MOUSE_GRABBED) ||
+@@ -1482,6 +1545,12 @@ LRESULT CALLBACK WIN_WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
+     } break;
+ 
+     case WM_LBUTTONUP:
++        if (data->in_hit_test_drag) {
++            // WM_CAPTURECHANGED ends the drag.
++            ReleaseCapture();
++            return 0;
++        }
++        SDL_FALLTHROUGH;
+     case WM_RBUTTONUP:
+     case WM_MBUTTONUP:
+     case WM_XBUTTONUP:
+@@ -1494,6 +1563,11 @@ LRESULT CALLBACK WIN_WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
+     case WM_XBUTTONDOWN:
+     case WM_XBUTTONDBLCLK:
+     {
++        /* The drag owns the mouse until the left release. A button reported now would make SDL
++           capture the mouse for it and release that capture with the button, which would end the drag. */
++        if (data->in_hit_test_drag) {
++            return 0;
++        }
+         /* SDL_Mouse *mouse = SDL_GetMouse(); */
+         if (!data->videodata->raw_mouse_enabled) {
+             if (WIN_GetMouseMessageSource((ULONG)GetMessageExtraInfo()) == SDL_MOUSE_EVENT_SOURCE_MOUSE &&
+@@ -1686,6 +1760,10 @@ LRESULT CALLBACK WIN_WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
+     {
+         data->in_title_click = true;
+ 
++        if (WIN_StartHitTestDrag(data, wParam, lParam)) {
++            return 0;
++        }
++
+         // Fix for 500ms hang after user clicks on the title bar, but before moving mouse
+         // Reference: https://gamedev.net/forums/topic/672094-keeping-things-moving-during-win32-moveresize-events/5254386/
+         if (SendMessage(hwnd, WM_NCHITTEST, wParam, lParam) == HTCAPTION) {
+@@ -1699,6 +1777,7 @@ LRESULT CALLBACK WIN_WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
+     case WM_CAPTURECHANGED:
+     {
+         data->in_title_click = false;
++        data->in_hit_test_drag = false;
+ 
+         // The mouse may have been released during a modal loop
+         WIN_CheckAsyncMouseRelease(WIN_GetEventTimestamp(), data);
+diff --git a/src/video/windows/SDL_windowswindow.h b/src/video/windows/SDL_windowswindow.h
+index 73229213f38dc7ffa7c484713e89bd4067b796dc..12fa8a0418d57372a3f517a4dda1d8c1d967b94e 100644
+--- a/src/video/windows/SDL_windowswindow.h
++++ b/src/video/windows/SDL_windowswindow.h
+@@ -84,6 +84,9 @@ struct SDL_WindowData
+     bool expected_resize;
+     bool in_border_change;
+     bool in_title_click;
++    // A drag that SDL_HITTEST_DRAGGABLE started, and the cursor's offset from the window's top left corner in screen pixels.
++    bool in_hit_test_drag;
++    POINT hit_test_drag_offset;
+     Uint8 focus_click_pending;
+     bool postpone_clipcursor;
+     bool clipcursor_queued;
