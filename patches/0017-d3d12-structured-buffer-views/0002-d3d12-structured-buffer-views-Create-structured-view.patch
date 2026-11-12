@@ -1,0 +1,521 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: botoddly <250804054+botoddly@users.noreply.github.com>
+Date: Thu, 12 Nov 2026 15:16:10 +0100
+Subject: [PATCH] d3d12-structured-buffer-views: Create structured views of a
+ buffer with a stride and bind them to structured slots
+
+---
+ src/gpu/d3d12/SDL_gpu_d3d12.c | 184 ++++++++++++++++++++++++++++++----
+ 1 file changed, 163 insertions(+), 21 deletions(-)
+
+diff --git a/src/gpu/d3d12/SDL_gpu_d3d12.c b/src/gpu/d3d12/SDL_gpu_d3d12.c
+index 42e39fd2e5cc3673afe76f2ac9d3d5ce66e7461c..2b4815e0262923a2f00e194f3e1a25d4321f6f6e 100644
+--- a/src/gpu/d3d12/SDL_gpu_d3d12.c
++++ b/src/gpu/d3d12/SDL_gpu_d3d12.c
+@@ -30,6 +30,7 @@
+ #include "../../video/windows/SDL_windowswindow.h"
+ #endif
+ #include "../SDL_sysgpu.h"
++#include <XDL/XDL.h>
+ 
+ #ifdef __IDXGIInfoQueue_INTERFACE_DEFINED__
+ #define HAVE_IDXGIINFOQUEUE
+@@ -1054,28 +1055,26 @@ struct D3D12CommandBuffer
+     D3D12_CPU_DESCRIPTOR_HANDLE vertexSamplerTextureDescriptorHandles[MAX_TEXTURE_SAMPLERS_PER_STAGE];
+     D3D12_CPU_DESCRIPTOR_HANDLE vertexSamplerDescriptorHandles[MAX_TEXTURE_SAMPLERS_PER_STAGE];
+     D3D12_CPU_DESCRIPTOR_HANDLE vertexStorageTextureDescriptorHandles[MAX_STORAGE_TEXTURES_PER_STAGE];
+-    D3D12_CPU_DESCRIPTOR_HANDLE vertexStorageBufferDescriptorHandles[MAX_STORAGE_BUFFERS_PER_STAGE];
++    D3D12Buffer *vertexStorageBuffers[MAX_STORAGE_BUFFERS_PER_STAGE];
+ 
+     D3D12UniformBuffer *vertexUniformBuffers[MAX_UNIFORM_BUFFERS_PER_STAGE];
+ 
+     D3D12_CPU_DESCRIPTOR_HANDLE fragmentSamplerTextureDescriptorHandles[MAX_TEXTURE_SAMPLERS_PER_STAGE];
+     D3D12_CPU_DESCRIPTOR_HANDLE fragmentSamplerDescriptorHandles[MAX_TEXTURE_SAMPLERS_PER_STAGE];
+     D3D12_CPU_DESCRIPTOR_HANDLE fragmentStorageTextureDescriptorHandles[MAX_STORAGE_TEXTURES_PER_STAGE];
+-    D3D12_CPU_DESCRIPTOR_HANDLE fragmentStorageBufferDescriptorHandles[MAX_STORAGE_BUFFERS_PER_STAGE];
++    D3D12Buffer *fragmentStorageBuffers[MAX_STORAGE_BUFFERS_PER_STAGE];
+ 
+     D3D12UniformBuffer *fragmentUniformBuffers[MAX_UNIFORM_BUFFERS_PER_STAGE];
+ 
+     D3D12_CPU_DESCRIPTOR_HANDLE computeSamplerTextureDescriptorHandles[MAX_TEXTURE_SAMPLERS_PER_STAGE];
+     D3D12_CPU_DESCRIPTOR_HANDLE computeSamplerDescriptorHandles[MAX_TEXTURE_SAMPLERS_PER_STAGE];
+     D3D12_CPU_DESCRIPTOR_HANDLE computeReadOnlyStorageTextureDescriptorHandles[MAX_STORAGE_TEXTURES_PER_STAGE];
+-    D3D12_CPU_DESCRIPTOR_HANDLE computeReadOnlyStorageBufferDescriptorHandles[MAX_STORAGE_BUFFERS_PER_STAGE];
+ 
+     // Track these separately because barriers can happen mid compute pass
+     D3D12Texture *computeReadOnlyStorageTextures[MAX_STORAGE_TEXTURES_PER_STAGE];
+     D3D12Buffer *computeReadOnlyStorageBuffers[MAX_STORAGE_BUFFERS_PER_STAGE];
+ 
+     D3D12_CPU_DESCRIPTOR_HANDLE computeReadWriteStorageTextureDescriptorHandles[MAX_COMPUTE_WRITE_TEXTURES];
+-    D3D12_CPU_DESCRIPTOR_HANDLE computeReadWriteStorageBufferDescriptorHandles[MAX_COMPUTE_WRITE_BUFFERS];
+ 
+     // Track these separately because they are bound when the compute pass begins
+     D3D12TextureSubresource *computeReadWriteStorageTextureSubresources[MAX_COMPUTE_WRITE_TEXTURES];
+@@ -1123,6 +1122,9 @@ struct D3D12Shader
+     Uint32 numUniformBuffers;
+     Uint32 numStorageBuffers;
+     Uint32 numStorageTextures;
++
++    // Bit i set: storage buffer slot i is a StructuredBuffer, XDL_PROP_GPU_SHADER_CREATE_STRUCTURED_STORAGE_BUFFERS_NUMBER.
++    Uint32 structuredStorageBuffers;
+ };
+ 
+ typedef struct D3D12GraphicsRootSignature
+@@ -1154,6 +1156,10 @@ struct D3D12GraphicsPipeline
+ 
+     Uint32 vertexStrides[MAX_VERTEX_BUFFERS];
+ 
++    // The structured storage buffer slots of the vertex and fragment shaders.
++    Uint32 vertexStructuredStorageBuffers;
++    Uint32 fragmentStructuredStorageBuffers;
++
+     SDL_AtomicInt referenceCount;
+ };
+ 
+@@ -1177,6 +1183,10 @@ struct D3D12ComputePipeline
+     ID3D12PipelineState *pipelineState;
+     D3D12ComputeRootSignature *rootSignature;
+ 
++    // The structured read-only and read-write storage buffer slots, as the XDL_PROP_GPU_COMPUTEPIPELINE_CREATE_STRUCTURED_* properties give them.
++    Uint32 structuredReadOnlyStorageBuffers;
++    Uint32 structuredReadWriteStorageBuffers;
++
+     SDL_AtomicInt referenceCount;
+ };
+ 
+@@ -1202,6 +1212,9 @@ struct D3D12Buffer
+     D3D12StagingDescriptor uavDescriptor;
+     D3D12StagingDescriptor srvDescriptor;
+     D3D12StagingDescriptor cbvDescriptor;
++    // Structured views of a buffer created with a valid stride, beside the raw ones; their heap is NULL otherwise.
++    D3D12StagingDescriptor structuredUavDescriptor;
++    D3D12StagingDescriptor structuredSrvDescriptor;
+     D3D12_GPU_VIRTUAL_ADDRESS virtualAddress;
+     Uint8 *mapPointer; // NULL except for upload buffers and fast uniform buffers
+     SDL_AtomicInt referenceCount;
+@@ -1212,8 +1225,12 @@ struct D3D12BufferContainer
+ {
+     BufferCommonHeader header;
+     Uint32 size;
++    Uint32 stride;
+     D3D12BufferType type;
+ 
++    // Set once a structured slot read the buffer through a raw view and the warning was logged.
++    SDL_AtomicInt warnedRawStructuredAccess;
++
+     D3D12Buffer *activeBuffer;
+ 
+     D3D12Buffer **buffers;
+@@ -1354,6 +1371,10 @@ static void D3D12_INTERNAL_DestroyBuffer(
+         &buffer->uavDescriptor);
+     D3D12_INTERNAL_ReleaseStagingDescriptorHandle(
+         &buffer->cbvDescriptor);
++    D3D12_INTERNAL_ReleaseStagingDescriptorHandle(
++        &buffer->structuredSrvDescriptor);
++    D3D12_INTERNAL_ReleaseStagingDescriptorHandle(
++        &buffer->structuredUavDescriptor);
+ 
+     if (buffer->handle) {
+         ID3D12Resource_Release(buffer->handle);
+@@ -2967,6 +2988,12 @@ static D3D12ComputeRootSignature *D3D12_INTERNAL_CreateComputeRootSignature(
+     return d3d12ComputeRootSignature;
+ }
+ 
++// The storage buffer slots a property marks as structured, one bit per slot.
++static Uint32 D3D12_INTERNAL_GetStructuredSlots(SDL_PropertiesID props, const char *name)
++{
++    return (Uint32)SDL_GetNumberProperty(props, name, 0) & ((1u << MAX_STORAGE_BUFFERS_PER_STAGE) - 1);
++}
++
+ static SDL_GPUComputePipeline *D3D12_CreateComputePipeline(
+     SDL_GPURenderer *driverData,
+     const SDL_GPUComputePipelineCreateInfo *createinfo)
+@@ -3028,6 +3055,12 @@ static SDL_GPUComputePipeline *D3D12_CreateComputePipeline(
+     computePipeline->header.numReadWriteStorageTextures = createinfo->num_readwrite_storage_textures;
+     computePipeline->header.numReadWriteStorageBuffers = createinfo->num_readwrite_storage_buffers;
+     computePipeline->header.numUniformBuffers = createinfo->num_uniform_buffers;
++    computePipeline->structuredReadOnlyStorageBuffers = D3D12_INTERNAL_GetStructuredSlots(
++        createinfo->props,
++        XDL_PROP_GPU_COMPUTEPIPELINE_CREATE_STRUCTURED_READONLY_STORAGE_BUFFERS_NUMBER);
++    computePipeline->structuredReadWriteStorageBuffers = D3D12_INTERNAL_GetStructuredSlots(
++        createinfo->props,
++        XDL_PROP_GPU_COMPUTEPIPELINE_CREATE_STRUCTURED_READWRITE_STORAGE_BUFFERS_NUMBER);
+     SDL_SetAtomicInt(&computePipeline->referenceCount, 0);
+ 
+     if (renderer->debug_mode && SDL_HasProperty(createinfo->props, SDL_PROP_GPU_COMPUTEPIPELINE_CREATE_NAME_STRING)) {
+@@ -3322,11 +3355,13 @@ static SDL_GPUGraphicsPipeline *D3D12_CreateGraphicsPipeline(
+     pipeline->header.num_vertex_storage_textures = vertShader->numStorageTextures;
+     pipeline->header.num_vertex_storage_buffers = vertShader->numStorageBuffers;
+     pipeline->header.num_vertex_uniform_buffers = vertShader->numUniformBuffers;
++    pipeline->vertexStructuredStorageBuffers = vertShader->structuredStorageBuffers;
+ 
+     pipeline->header.num_fragment_samplers = fragShader->num_samplers;
+     pipeline->header.num_fragment_storage_textures = fragShader->numStorageTextures;
+     pipeline->header.num_fragment_storage_buffers = fragShader->numStorageBuffers;
+     pipeline->header.num_fragment_uniform_buffers = fragShader->numUniformBuffers;
++    pipeline->fragmentStructuredStorageBuffers = fragShader->structuredStorageBuffers;
+ 
+     SDL_SetAtomicInt(&pipeline->referenceCount, 0);
+ 
+@@ -3416,6 +3451,9 @@ static SDL_GPUShader *D3D12_CreateShader(
+     shader->numStorageBuffers = createinfo->num_storage_buffers;
+     shader->numStorageTextures = createinfo->num_storage_textures;
+     shader->numUniformBuffers = createinfo->num_uniform_buffers;
++    shader->structuredStorageBuffers = D3D12_INTERNAL_GetStructuredSlots(
++        createinfo->props,
++        XDL_PROP_GPU_SHADER_CREATE_STRUCTURED_STORAGE_BUFFERS_NUMBER);
+ 
+     shader->bytecode = bytecode;
+     shader->bytecodeSize = bytecodeSize;
+@@ -3790,10 +3828,20 @@ static SDL_GPUTexture *D3D12_CreateTexture(
+     return (SDL_GPUTexture *)container;
+ }
+ 
++// Direct3D 12 limits a structured view's stride. A buffer with another stride, or smaller than one element, keeps only its raw views.
++static bool D3D12_INTERNAL_IsStructuredStride(Uint32 size, Uint32 stride)
++{
++    return stride > 0 &&
++           stride % 4 == 0 &&
++           stride <= D3D12_REQ_MULTI_ELEMENT_STRUCTURE_SIZE_IN_BYTES &&
++           size >= stride;
++}
++
+ static D3D12Buffer *D3D12_INTERNAL_CreateBuffer(
+     D3D12Renderer *renderer,
+     SDL_GPUBufferUsageFlags usageFlags,
+     Uint32 size,
++    Uint32 stride,
+     D3D12BufferType type,
+     const char *debugName)
+ {
+@@ -3894,6 +3942,8 @@ static D3D12Buffer *D3D12_INTERNAL_CreateBuffer(
+     buffer->uavDescriptor.heap = NULL;
+     buffer->srvDescriptor.heap = NULL;
+     buffer->cbvDescriptor.heap = NULL;
++    buffer->structuredUavDescriptor.heap = NULL;
++    buffer->structuredSrvDescriptor.heap = NULL;
+ 
+     if (usageFlags & SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE) {
+         D3D12_INTERNAL_AssignStagingDescriptorHandle(
+@@ -3916,6 +3966,25 @@ static D3D12Buffer *D3D12_INTERNAL_CreateBuffer(
+             NULL, // TODO: support counters?
+             &uavDesc,
+             buffer->uavDescriptor.cpuHandle);
++
++        if (D3D12_INTERNAL_IsStructuredStride(size, stride)) {
++            D3D12_INTERNAL_AssignStagingDescriptorHandle(
++                renderer,
++                D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
++                &buffer->structuredUavDescriptor);
++
++            uavDesc.Format = DXGI_FORMAT_UNKNOWN;
++            uavDesc.Buffer.NumElements = size / stride;
++            uavDesc.Buffer.Flags = D3D12_BUFFER_UAV_FLAG_NONE;
++            uavDesc.Buffer.StructureByteStride = stride;
++
++            ID3D12Device_CreateUnorderedAccessView(
++                renderer->device,
++                handle,
++                NULL,
++                &uavDesc,
++                buffer->structuredUavDescriptor.cpuHandle);
++        }
+     }
+ 
+     if (
+@@ -3940,6 +4009,24 @@ static D3D12Buffer *D3D12_INTERNAL_CreateBuffer(
+             handle,
+             &srvDesc,
+             buffer->srvDescriptor.cpuHandle);
++
++        if (D3D12_INTERNAL_IsStructuredStride(size, stride)) {
++            D3D12_INTERNAL_AssignStagingDescriptorHandle(
++                renderer,
++                D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
++                &buffer->structuredSrvDescriptor);
++
++            srvDesc.Format = DXGI_FORMAT_UNKNOWN;
++            srvDesc.Buffer.NumElements = size / stride;
++            srvDesc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE;
++            srvDesc.Buffer.StructureByteStride = stride;
++
++            ID3D12Device_CreateShaderResourceView(
++                renderer->device,
++                handle,
++                &srvDesc,
++                buffer->structuredSrvDescriptor.cpuHandle);
++        }
+     }
+ 
+     // FIXME: we may not need a CBV since we use root descriptors
+@@ -3997,6 +4084,7 @@ static D3D12BufferContainer *D3D12_INTERNAL_CreateBufferContainer(
+     D3D12Renderer *renderer,
+     SDL_GPUBufferUsageFlags usageFlags,
+     Uint32 size,
++    Uint32 stride,
+     D3D12BufferType type,
+     const char *debugName)
+ {
+@@ -4010,6 +4098,7 @@ static D3D12BufferContainer *D3D12_INTERNAL_CreateBufferContainer(
+ 
+     container->header.usage = usageFlags;
+     container->size = size;
++    container->stride = stride;
+     container->type = type;
+ 
+     container->bufferCapacity = 1;
+@@ -4026,6 +4115,7 @@ static D3D12BufferContainer *D3D12_INTERNAL_CreateBufferContainer(
+         renderer,
+         usageFlags,
+         size,
++        stride,
+         type,
+         debugName);
+ 
+@@ -4058,6 +4148,7 @@ static SDL_GPUBuffer *D3D12_CreateBuffer(
+         (D3D12Renderer *)driverData,
+         usageFlags,
+         size,
++        stride,
+         D3D12_BUFFER_TYPE_GPU,
+         debugName);
+ }
+@@ -4072,6 +4163,7 @@ static SDL_GPUTransferBuffer *D3D12_CreateTransferBuffer(
+         (D3D12Renderer *)driverData,
+         0,
+         size,
++        0,
+         usage == SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD ? D3D12_BUFFER_TYPE_UPLOAD : D3D12_BUFFER_TYPE_DOWNLOAD,
+         debugName);
+ }
+@@ -4366,6 +4458,7 @@ static void D3D12_INTERNAL_CycleActiveBuffer(
+         renderer,
+         container->header.usage,
+         container->size,
++        container->stride,
+         container->type,
+         container->debugName);
+ 
+@@ -4641,6 +4734,7 @@ static D3D12UniformBuffer *D3D12_INTERNAL_AcquireUniformBufferFromPool(
+             renderer,
+             0,
+             UNIFORM_BUFFER_SIZE,
++            0,
+             D3D12_BUFFER_TYPE_UNIFORM,
+             NULL);
+         if (!uniformBuffer->buffer) {
+@@ -4916,12 +5010,12 @@ static void D3D12_BindVertexStorageBuffers(
+ 
+     for (Uint32 i = 0; i < numBindings; i += 1) {
+         D3D12BufferContainer *container = (D3D12BufferContainer *)storageBuffers[i];
+-        if (d3d12CommandBuffer->vertexStorageBufferDescriptorHandles[firstSlot + i].ptr != container->activeBuffer->srvDescriptor.cpuHandle.ptr) {
++        if (d3d12CommandBuffer->vertexStorageBuffers[firstSlot + i] != container->activeBuffer) {
+             D3D12_INTERNAL_TrackBuffer(
+                 d3d12CommandBuffer,
+                 container->activeBuffer);
+ 
+-            d3d12CommandBuffer->vertexStorageBufferDescriptorHandles[firstSlot + i] = container->activeBuffer->srvDescriptor.cpuHandle;
++            d3d12CommandBuffer->vertexStorageBuffers[firstSlot + i] = container->activeBuffer;
+             d3d12CommandBuffer->needVertexStorageBufferBind = true;
+         }
+     }
+@@ -4991,12 +5085,12 @@ static void D3D12_BindFragmentStorageBuffers(
+     for (Uint32 i = 0; i < numBindings; i += 1) {
+         D3D12BufferContainer *container = (D3D12BufferContainer *)storageBuffers[i];
+ 
+-        if (d3d12CommandBuffer->fragmentStorageBufferDescriptorHandles[firstSlot + i].ptr != container->activeBuffer->srvDescriptor.cpuHandle.ptr) {
++        if (d3d12CommandBuffer->fragmentStorageBuffers[firstSlot + i] != container->activeBuffer) {
+             D3D12_INTERNAL_TrackBuffer(
+                 d3d12CommandBuffer,
+                 container->activeBuffer);
+ 
+-            d3d12CommandBuffer->fragmentStorageBufferDescriptorHandles[firstSlot + i] = container->activeBuffer->srvDescriptor.cpuHandle;
++            d3d12CommandBuffer->fragmentStorageBuffers[firstSlot + i] = container->activeBuffer;
+             d3d12CommandBuffer->needFragmentStorageBufferBind = true;
+         }
+     }
+@@ -5055,6 +5149,38 @@ static void D3D12_INTERNAL_SetGPUDescriptorHeaps(D3D12CommandBuffer *commandBuff
+         heaps);
+ }
+ 
++/* The descriptor of a storage buffer slot: the buffer's structured view when the shader declares the slot structured, otherwise its raw view.
++ * Direct3D 12 takes a structured buffer's stride from its view, so a structured slot read through the raw view, whose stride is 0, reads wrong elements on some drivers.
++ * A buffer without a structured view, created without XDL_PROP_GPU_BUFFER_CREATE_STRIDE_NUMBER, keeps that behavior, and the first such read logs a warning.
++ * An unbound slot gets a zero handle, which D3D12_INTERNAL_WriteGPUDescriptors skips. */
++static D3D12_CPU_DESCRIPTOR_HANDLE D3D12_INTERNAL_GetStorageBufferDescriptor(
++    D3D12Buffer *buffer,
++    Uint32 structuredSlots,
++    Uint32 slot,
++    bool readWrite)
++{
++    D3D12_CPU_DESCRIPTOR_HANDLE none;
++    none.ptr = 0;
++    if (buffer == NULL) {
++        return none;
++    }
++
++    if (structuredSlots & (1u << slot)) {
++        D3D12StagingDescriptor *structured = readWrite ? &buffer->structuredUavDescriptor : &buffer->structuredSrvDescriptor;
++        if (structured->heap != NULL) {
++            return structured->cpuHandle;
++        }
++
++        if (SDL_CompareAndSwapAtomicInt(&buffer->container->warnedRawStructuredAccess, 0, 1)) {
++            SDL_LogWarn(
++                SDL_LOG_CATEGORY_GPU,
++                "A structured storage buffer slot is bound to a buffer without a structured view, so it reads the raw view. Create the buffer with XDL_PROP_GPU_BUFFER_CREATE_STRIDE_NUMBER, a multiple of 4 up to 2048.");
++        }
++    }
++
++    return readWrite ? buffer->uavDescriptor.cpuHandle : buffer->srvDescriptor.cpuHandle;
++}
++
+ static void D3D12_INTERNAL_WriteGPUDescriptors(
+     D3D12CommandBuffer *commandBuffer,
+     D3D12_DESCRIPTOR_HEAP_TYPE heapType,
+@@ -5184,7 +5310,11 @@ static void D3D12_INTERNAL_BindGraphicsResources(
+     if (commandBuffer->needVertexStorageBufferBind) {
+         if (graphicsPipeline->header.num_vertex_storage_buffers > 0) {
+             for (Uint32 i = 0; i < graphicsPipeline->header.num_vertex_storage_buffers; i += 1) {
+-                cpuHandles[i] = commandBuffer->vertexStorageBufferDescriptorHandles[i];
++                cpuHandles[i] = D3D12_INTERNAL_GetStorageBufferDescriptor(
++                    commandBuffer->vertexStorageBuffers[i],
++                    graphicsPipeline->vertexStructuredStorageBuffers,
++                    i,
++                    false);
+             }
+ 
+             D3D12_INTERNAL_WriteGPUDescriptors(
+@@ -5275,7 +5405,11 @@ static void D3D12_INTERNAL_BindGraphicsResources(
+     if (commandBuffer->needFragmentStorageBufferBind) {
+         if (graphicsPipeline->header.num_fragment_storage_buffers > 0) {
+             for (Uint32 i = 0; i < graphicsPipeline->header.num_fragment_storage_buffers; i += 1) {
+-                cpuHandles[i] = commandBuffer->fragmentStorageBufferDescriptorHandles[i];
++                cpuHandles[i] = D3D12_INTERNAL_GetStorageBufferDescriptor(
++                    commandBuffer->fragmentStorageBuffers[i],
++                    graphicsPipeline->fragmentStructuredStorageBuffers,
++                    i,
++                    false);
+             }
+ 
+             D3D12_INTERNAL_WriteGPUDescriptors(
+@@ -5463,12 +5597,12 @@ static void D3D12_EndRenderPass(
+     SDL_zeroa(d3d12CommandBuffer->vertexSamplerTextureDescriptorHandles);
+     SDL_zeroa(d3d12CommandBuffer->vertexSamplerDescriptorHandles);
+     SDL_zeroa(d3d12CommandBuffer->vertexStorageTextureDescriptorHandles);
+-    SDL_zeroa(d3d12CommandBuffer->vertexStorageBufferDescriptorHandles);
++    SDL_zeroa(d3d12CommandBuffer->vertexStorageBuffers);
+ 
+     SDL_zeroa(d3d12CommandBuffer->fragmentSamplerTextureDescriptorHandles);
+     SDL_zeroa(d3d12CommandBuffer->fragmentSamplerDescriptorHandles);
+     SDL_zeroa(d3d12CommandBuffer->fragmentStorageTextureDescriptorHandles);
+-    SDL_zeroa(d3d12CommandBuffer->fragmentStorageBufferDescriptorHandles);
++    SDL_zeroa(d3d12CommandBuffer->fragmentStorageBuffers);
+ }
+ 
+ // Compute Pass
+@@ -5521,7 +5655,6 @@ static void D3D12_BeginComputePass(
+                 D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+ 
+             d3d12CommandBuffer->computeReadWriteStorageBuffers[i] = buffer;
+-            d3d12CommandBuffer->computeReadWriteStorageBufferDescriptorHandles[i] = buffer->uavDescriptor.cpuHandle;
+ 
+             D3D12_INTERNAL_TrackBuffer(
+                 d3d12CommandBuffer,
+@@ -5593,14 +5726,19 @@ static void D3D12_BindComputePipeline(
+ 
+     if (pipeline->header.numReadWriteStorageBuffers > 0) {
+         for (Uint32 i = 0; i < pipeline->header.numReadWriteStorageBuffers; i += 1) {
+-            cpuHandles[i] = d3d12CommandBuffer->computeReadWriteStorageBufferDescriptorHandles[i];
++            cpuHandles[i] = D3D12_INTERNAL_GetStorageBufferDescriptor(
++                i < d3d12CommandBuffer->computeReadWriteStorageBufferCount ? d3d12CommandBuffer->computeReadWriteStorageBuffers[i] : NULL,
++                pipeline->structuredReadWriteStorageBuffers,
++                i,
++                true);
+         }
+ 
++        // As many descriptors as the pipeline declares, which the loop above filled, not as many as the pass bound.
+         D3D12_INTERNAL_WriteGPUDescriptors(
+             d3d12CommandBuffer,
+             D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
+             cpuHandles,
+-            d3d12CommandBuffer->computeReadWriteStorageBufferCount,
++            pipeline->header.numReadWriteStorageBuffers,
+             &gpuDescriptorHandle);
+ 
+         ID3D12GraphicsCommandList_SetComputeRootDescriptorTable(
+@@ -5711,7 +5849,6 @@ static void D3D12_BindComputeStorageBuffers(
+                 buffer);
+ 
+             d3d12CommandBuffer->computeReadOnlyStorageBuffers[firstSlot + i] = buffer;
+-            d3d12CommandBuffer->computeReadOnlyStorageBufferDescriptorHandles[firstSlot + i] = buffer->srvDescriptor.cpuHandle;
+             d3d12CommandBuffer->needComputeReadOnlyStorageBufferBind = true;
+         }
+     }
+@@ -5807,7 +5944,11 @@ static void D3D12_INTERNAL_BindComputeResources(
+     if (commandBuffer->needComputeReadOnlyStorageBufferBind) {
+         if (computePipeline->header.numReadonlyStorageBuffers > 0) {
+             for (Uint32 i = 0; i < computePipeline->header.numReadonlyStorageBuffers; i += 1) {
+-                cpuHandles[i] = commandBuffer->computeReadOnlyStorageBufferDescriptorHandles[i];
++                cpuHandles[i] = D3D12_INTERNAL_GetStorageBufferDescriptor(
++                    commandBuffer->computeReadOnlyStorageBuffers[i],
++                    computePipeline->structuredReadOnlyStorageBuffers,
++                    i,
++                    false);
+             }
+ 
+             D3D12_INTERNAL_WriteGPUDescriptors(
+@@ -5930,7 +6071,6 @@ static void D3D12_EndComputePass(
+     SDL_zeroa(d3d12CommandBuffer->computeSamplerDescriptorHandles);
+ 
+     SDL_zeroa(d3d12CommandBuffer->computeReadWriteStorageTextureDescriptorHandles);
+-    SDL_zeroa(d3d12CommandBuffer->computeReadWriteStorageBufferDescriptorHandles);
+ 
+     d3d12CommandBuffer->currentComputePipeline = NULL;
+ }
+@@ -6085,6 +6225,7 @@ static void D3D12_UploadToTexture(
+             d3d12CommandBuffer->renderer,
+             0,
+             alignedBytesPerSlice * destination->d,
++            0,
+             D3D12_BUFFER_TYPE_UPLOAD,
+             NULL);
+ 
+@@ -6131,6 +6272,7 @@ static void D3D12_UploadToTexture(
+             d3d12CommandBuffer->renderer,
+             0,
+             alignedRowPitch * blockHeight * destination->d,
++            0,
+             D3D12_BUFFER_TYPE_UPLOAD,
+             NULL);
+ 
+@@ -6425,6 +6567,7 @@ static void D3D12_DownloadFromTexture(
+             d3d12CommandBuffer->renderer,
+             0,
+             alignedRowPitch * rowsPerSlice * source->d,
++            0,
+             D3D12_BUFFER_TYPE_DOWNLOAD,
+             NULL);
+ 
+@@ -7740,19 +7883,18 @@ static SDL_GPUCommandBuffer *D3D12_AcquireCommandBuffer(
+     SDL_zeroa(commandBuffer->vertexSamplerTextureDescriptorHandles);
+     SDL_zeroa(commandBuffer->vertexSamplerDescriptorHandles);
+     SDL_zeroa(commandBuffer->vertexStorageTextureDescriptorHandles);
+-    SDL_zeroa(commandBuffer->vertexStorageBufferDescriptorHandles);
++    SDL_zeroa(commandBuffer->vertexStorageBuffers);
+     SDL_zeroa(commandBuffer->vertexUniformBuffers);
+ 
+     SDL_zeroa(commandBuffer->fragmentSamplerTextureDescriptorHandles);
+     SDL_zeroa(commandBuffer->fragmentSamplerDescriptorHandles);
+     SDL_zeroa(commandBuffer->fragmentStorageTextureDescriptorHandles);
+-    SDL_zeroa(commandBuffer->fragmentStorageBufferDescriptorHandles);
++    SDL_zeroa(commandBuffer->fragmentStorageBuffers);
+     SDL_zeroa(commandBuffer->fragmentUniformBuffers);
+ 
+     SDL_zeroa(commandBuffer->computeSamplerTextureDescriptorHandles);
+     SDL_zeroa(commandBuffer->computeSamplerDescriptorHandles);
+     SDL_zeroa(commandBuffer->computeReadOnlyStorageTextureDescriptorHandles);
+-    SDL_zeroa(commandBuffer->computeReadOnlyStorageBufferDescriptorHandles);
+     SDL_zeroa(commandBuffer->computeReadOnlyStorageTextures);
+     SDL_zeroa(commandBuffer->computeReadOnlyStorageBuffers);
+     SDL_zeroa(commandBuffer->computeReadWriteStorageTextureSubresources);
