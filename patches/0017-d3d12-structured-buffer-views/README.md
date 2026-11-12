@@ -17,7 +17,7 @@ For example, a buffer of 112-byte elements created with a stride of 112, bound t
 
 - Creates a structured SRV and, for `SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE`, a structured UAV beside the raw ones, under the same usage checks, when the stride is a multiple of 4, at most 2048 bytes (`D3D12_REQ_MULTI_ELEMENT_STRUCTURE_SIZE_IN_BYTES`) and no larger than the buffer. A cycled buffer gets the same views.
 - Keeps the bound buffer of each graphics storage buffer slot instead of its raw descriptor, and picks the view of each slot when it writes the slot's descriptors to the GPU heap: before a draw or dispatch whose storage buffers a pipeline bind or a new binding changed, and for read-write compute buffers when the compute pipeline is bound. Binding stays a descriptor copy.
-- Binds the raw view, as stock SDL does, to a structured slot whose buffer has no structured view, and logs a warning the first time it does so for each buffer. A negative slot property marks no slot.
+- Binds the raw view, as stock SDL does, to a structured slot whose buffer has no structured view, and logs a warning the first time it does so on the device. A negative slot property marks no slot.
 
 Binding read-write compute buffers now writes as many descriptors as the pipeline declares. Stock SDL filled that many but wrote as many as the compute pass bound, so a pass that bound more copied handles it never set.
 
