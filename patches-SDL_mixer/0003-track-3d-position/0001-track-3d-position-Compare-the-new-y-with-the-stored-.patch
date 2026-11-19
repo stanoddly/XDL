@@ -1,6 +1,6 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
-From: botoddly <250804054+botoddly@users.noreply.github.com>
-Date: Thu, 19 Nov 2026 14:01:47 +0100
+From: "Ryan C. Gordon" <icculus@icculus.org>
+Date: Wed, 4 Nov 2026 22:35:50 -0500
 Subject: [PATCH] track-3d-position: Compare the new y with the stored y in
  MIX_SetTrack3DPosition
 

@@ -58,7 +58,7 @@ Review it as the next two sections describe, and push any fix to its branch. Bui
 2. Review `git diff <old-tag> <new-tag>` for the paths the patches touch. A new file can apply and compile while SDL changes behavior around it. Also confirm that SDL has not claimed shader format bit `1u << 6`, which XDL uses for WGSL.
 3. Run `tools/apply.sh`. At a conflict, read the patch's README, resolve it in `build/SDL`, and run `git am --continue`. To start over, run `git am --abort` there, then `tools/apply.sh`.
 4. If the release adds functions to `SDL_dynapi_procs.h`, keep XDL's lines last and increase the counter in `SDL_DYNAPI_VERSION`. XDL's slots move, so an older XDL app would otherwise call the wrong function through `SDL3_DYNAMIC_API`.
-5. Run `tools/export.sh`, then update any README that changed.
+5. Run `tools/export.sh`, then update any README that changed. When the export leaves a patch directory with no `.patch` file, the new release already contains that patch. Delete the directory. When it drops only some of a patch's commits, update the patch's README instead.
 6. Rebuild XDL and the satellites, and compare the notices, as in [Third-party notices](#third-party-notices).
 
 ## Moving a satellite to a new release
@@ -73,7 +73,7 @@ Review it as the next two sections describe, and push any fix to its branch. Bui
 
 2. Move the submodule: `git -C external/SDL_image fetch --tags origin`, `git -C external/SDL_image checkout <new-tag>`, `git add external/SDL_image`.
 3. Review `git diff <old-tag> <new-tag>` for the paths the patches touch, and for `AGENTS.md` or `CLAUDE.md` files. Such files tell agents not to contribute upstream; delete them in a patch, as `patches-SDL_mixer/0001-remove-instruction-files` does.
-4. Run `tools/apply.sh SDL_image` and `tools/export.sh SDL_image`, and resolve conflicts as for SDL.
+4. Run `tools/apply.sh SDL_image` and `tools/export.sh SDL_image`, and resolve conflicts and handle the export as in steps 3 and 5 for SDL.
 5. Check the codecs in `tools/build-project.sh`. Each satellite's list of vendored submodules matches its CMake flags. A new codec option or submodule needs a decision there, and its license must allow linking into a zlib-licensed library.
 6. Run `tools/build-project.sh SDL_image build/install`, then `tools/check-dependencies.sh` on the library. Compare the codec summary that CMake prints with the old one.
 7. Run step 1 again into `build/notices-after.txt` and `build/license-files-after.txt`, and compare them, as described in [Third-party notices](#third-party-notices).
