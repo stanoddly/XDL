@@ -1,0 +1,24 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: "Ryan C. Gordon" <icculus@icculus.org>
+Date: Wed, 4 Nov 2026 22:35:50 -0500
+Subject: [PATCH] track-3d-position: Compare the new y with the stored y in
+ MIX_SetTrack3DPosition
+
+Upstream commit 815594e3d8676851d679f134a599a20a2764e14e on release-3.2.x, cherry-picked from 72cb03c61f2734ae9f3541003f2847b4f6b73684 on main.
+---
+ src/SDL_mixer.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/SDL_mixer.c b/src/SDL_mixer.c
+index 63fa9f182177152539629b0f6a6a34ecec1690a3..438ffa856e3e9fb72bc44c08a1577427a5ed041c 100644
+--- a/src/SDL_mixer.c
++++ b/src/SDL_mixer.c
+@@ -2852,7 +2852,7 @@ bool MIX_SetTrack3DPosition(MIX_Track *track, const MIX_Point3D *position)
+         track->position3d[0] = track->position3d[1] = track->position3d[2] = 0.0f;
+     } else {
+         float *tposition3d = track->position3d;
+-        if (toggling || ((tposition3d[0] != position->x) || (tposition3d[2] != position->y) || (tposition3d[2] != position->z))) {
++        if (toggling || ((tposition3d[0] != position->x) || (tposition3d[1] != position->y) || (tposition3d[2] != position->z))) {
+             tposition3d[0] = position->x;
+             tposition3d[1] = position->y;
+             tposition3d[2] = position->z;
