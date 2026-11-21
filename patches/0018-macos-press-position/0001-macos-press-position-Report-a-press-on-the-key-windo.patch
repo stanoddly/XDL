@@ -6,8 +6,7 @@ Subject: [PATCH] macos-press-position: Report a press on the key window at its
 
 ---
  src/video/cocoa/SDL_cocoawindow.m | 10 ++++++++++
- test/testinputregion.c            | 26 ++++++++++++++++++++++++--
- 2 files changed, 34 insertions(+), 2 deletions(-)
+ 1 file changed, 10 insertions(+)
 
 diff --git a/src/video/cocoa/SDL_cocoawindow.m b/src/video/cocoa/SDL_cocoawindow.m
 index ecd35cbd508b2f462e62713d6cc8f0998195d3c8..6081c0ee326b3f8c5dce9e5eeee2603ec3989b49 100644
@@ -30,80 +29,3 @@ index ecd35cbd508b2f462e62713d6cc8f0998195d3c8..6081c0ee326b3f8c5dce9e5eeee2603e
          //SDL_SendMouseButtonClicks(Cocoa_GetEventTimestamp([theEvent timestamp]), window, mouseID, button, down, clicks);
          SDL_SendMouseButton(Cocoa_GetEventTimestamp([theEvent timestamp]), window, mouseID, button, down);
      } else {
-diff --git a/test/testinputregion.c b/test/testinputregion.c
-index 44e98259e9d27eac2b220bbbe54cb8ab2906f88a..8b4ee9be8ffdb8494b318385d7facecd1c19b387 100644
---- a/test/testinputregion.c
-+++ b/test/testinputregion.c
-@@ -16,6 +16,7 @@
- 
-    --move  slides the squares across the window, setting the region again every frame.
-    --fullscreen  covers the display instead, like a desktop overlay.
-+   --below  also opens a plain window of the same app beneath it, which takes keyboard focus. Its mouse events are logged too.
-    --seconds N  quits after N seconds. Otherwise quit with Ctrl+C, or with Escape while the window has keyboard focus. */
- 
- #include <SDL3/SDL.h>
-@@ -70,6 +71,9 @@ int main(int argc, char *argv[])
- {
-     SDL_Window *window;
-     SDL_Renderer *renderer;
-+    SDL_Window *below_window = NULL;
-+    SDL_Renderer *below_renderer = NULL;
-+    bool below = false;
-     SDL_WindowFlags flags = SDL_WINDOW_TRANSPARENT | SDL_WINDOW_BORDERLESS | SDL_WINDOW_ALWAYS_ON_TOP;
-     SDL_Rect squares[NUM_SQUARES];
-     bool move = false;
-@@ -86,10 +90,12 @@ int main(int argc, char *argv[])
-             move = true;
-         } else if (SDL_strcmp(argv[i], "--fullscreen") == 0) {
-             flags |= SDL_WINDOW_FULLSCREEN;
-+        } else if (SDL_strcmp(argv[i], "--below") == 0) {
-+            below = true;
-         } else if (SDL_strcmp(argv[i], "--seconds") == 0 && i + 1 < argc) {
-             deadline = SDL_GetTicks() + (Uint64)SDL_atoi(argv[++i]) * 1000;
-         } else {
--            SDL_Log("Usage: %s [--move] [--fullscreen] [--seconds N]", argv[0]);
-+            SDL_Log("Usage: %s [--move] [--fullscreen] [--below] [--seconds N]", argv[0]);
-             return 1;
-         }
-     }
-@@ -112,6 +118,15 @@ int main(int argc, char *argv[])
-         return 1;
-     }
-     SDL_Log("Window %" SDL_PRIu32 " takes mouse input only inside its squares", SDL_GetWindowID(window));
-+    if (below) {
-+        if (!SDL_CreateWindowAndRenderer("testinputregion below", 400, 300, 0, &below_window, &below_renderer)) {
-+            SDL_Log("SDL_CreateWindowAndRenderer failed: %s", SDL_GetError());
-+            SDL_Quit();
-+            return 1;
-+        }
-+        SDL_RaiseWindow(below_window);
-+        SDL_Log("Window %" SDL_PRIu32 " is beneath it", SDL_GetWindowID(below_window));
-+    }
-     PlaceSquares(window, offset, squares);
- 
-     while (!done) {
-@@ -128,7 +143,7 @@ int main(int argc, char *argv[])
-                 LogEvent(&event);
-                 if (event.type == SDL_EVENT_QUIT || (event.type == SDL_EVENT_KEY_DOWN && event.key.key == SDLK_ESCAPE)) {
-                     done = true;
--                } else if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
-+                } else if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN && event.button.windowID == SDL_GetWindowID(window)) {
-                     const SDL_Point point = { (int)event.button.x, (int)event.button.y };
-                     held = -1;
-                     for (i = 0; i < NUM_SQUARES; ++i) {
-@@ -169,8 +184,15 @@ int main(int argc, char *argv[])
-             SDL_RenderFillRect(renderer, &rect);
-         }
-         SDL_RenderPresent(renderer);
-+        if (below_renderer) {
-+            SDL_SetRenderDrawColor(below_renderer, 96, 96, 96, SDL_ALPHA_OPAQUE);
-+            SDL_RenderClear(below_renderer);
-+            SDL_RenderPresent(below_renderer);
-+        }
-     }
- 
-+    SDL_DestroyRenderer(below_renderer);
-+    SDL_DestroyWindow(below_window);
-     SDL_DestroyRenderer(renderer);
-     SDL_DestroyWindow(window);
-     SDL_Quit();
