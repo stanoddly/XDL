@@ -10,7 +10,7 @@ Subject: [PATCH] macos-press-position: Report a press on the key window at its
  2 files changed, 34 insertions(+), 2 deletions(-)
 
 diff --git a/src/video/cocoa/SDL_cocoawindow.m b/src/video/cocoa/SDL_cocoawindow.m
-index c2181d1859837018a9ed608315a0889734ae5221..b8c07350e878a8779d29dd4bac165a800627195a 100644
+index ecd35cbd508b2f462e62713d6cc8f0998195d3c8..6081c0ee326b3f8c5dce9e5eeee2603ec3989b49 100644
 --- a/src/video/cocoa/SDL_cocoawindow.m
 +++ b/src/video/cocoa/SDL_cocoawindow.m
 @@ -1767,6 +1767,16 @@ static void Cocoa_SendMouseButtonClicks(SDL_Mouse *mouse, NSEvent *theEvent, SDL

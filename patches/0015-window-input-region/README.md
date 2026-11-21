@@ -7,7 +7,7 @@ For example, a transparent window over the whole display passes the rectangles o
 - **Wayland:** the rectangles become the surface's input region. They are mapped to surface coordinates with the scale SDL uses for mouse events, which differs from 1 when scaling to the display or emulating a fullscreen mode. The region takes effect with the next present.
 - **X11:** `XShapeCombineRectangles` with `ShapeInput`. It fails without the SHAPE extension.
 - **Windows:** Windows has no input region that leaves drawing alone. So the window becomes input-transparent, and a low-level mouse hook blocks a left press inside the region and its release, and reports both to the window. A press goes through when a window above covers that point, and when the window is cloaked, as on another virtual desktop. The hook and its thread move out of mouse passthrough events into their own file, and both features share them.
-- **macOS:** Cocoa has no input region either. `ignoresMouseEvents` follows whether the cursor is inside a rectangle, on each call and on mouse motion. A window that ignores mouse events gets no motion, so a global monitor watches the motion other applications get, and a local one the motion the application's other windows get. While a button pressed in the window is held, it keeps taking input.
+- **macOS:** Cocoa has no input region either. `ignoresMouseEvents` follows whether the cursor is inside a rectangle, on each call and on mouse motion. A global monitor watches the motion other applications get, and a local one the motion the application's other windows get. Cocoa still sends the window motion over the application's other windows, so the window drops motion outside the region and loses the mouse focus, as on X11 and Wayland. While a button pressed in the window is held, it keeps taking input.
 
 Mouse passthrough events report input that goes to other windows. That is a different use case, so a window can't have both. `XDL_SetWindowInputRegion` fails while the window has them enabled. Once the window has a region, even an empty one, enabling them fails, and so does `SDL_SetWindowShape`, which would otherwise undo the region differently on each platform.
 
@@ -22,6 +22,7 @@ The code comes from botoddly/SDL#4, which replaced mouse passthrough events with
 
 - On Windows, where the regions of several windows overlap, which one takes a press does not depend on their stacking order.
 - Windows silently removes a low-level mouse hook that keeps missing its timeout. The region then stops taking input, and the app is not told.
+- On macOS, when the pointer leaves the region onto another application's window, the window keeps the mouse focus and gets no leave, as only a global monitor sees that motion. The leave comes with the next motion over another window of the application. If the pointer comes straight back into the region, the window gets neither a leave nor a new enter.
 
 ## Testing
 
