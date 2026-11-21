@@ -1,0 +1,35 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: botoddly <250804054+botoddly@users.noreply.github.com>
+Date: Fri, 20 Nov 2026 23:08:30 +0100
+Subject: [PATCH] macos-hit-test-press: Test a left press itself for a window
+ drag
+
+---
+ src/video/cocoa/SDL_cocoawindow.m | 14 ++++++++++++++
+ 1 file changed, 14 insertions(+)
+
+diff --git a/src/video/cocoa/SDL_cocoawindow.m b/src/video/cocoa/SDL_cocoawindow.m
+index c2181d1859837018a9ed608315a0889734ae5221..4c695d9805bdb3d88abb2cf945e08442b3eb623a 100644
+--- a/src/video/cocoa/SDL_cocoawindow.m
++++ b/src/video/cocoa/SDL_cocoawindow.m
+@@ -138,6 +138,20 @@
+ - (void)sendEvent:(NSEvent *)event
+ {
+     id delegate;
++
++    /* The hit test of the last mouse event set whether the window moves by its background. Without a motion since,
++       as over a window that is not key, it can be stale, so test the press's own place before AppKit handles it.
++       A pen's press is left alone, as the pen events skip the hit test. */
++    if ([event type] == NSEventTypeLeftMouseDown && [event subtype] != NSEventSubtypeTabletPoint &&
++        [event subtype] != NSEventSubtypeTabletProximity) {
++        delegate = [self delegate];
++        if ([delegate isKindOfClass:[SDL3Cocoa_WindowListener class]] &&
++            NSMouseInRect([event locationInWindow], [[self contentView] frame], NO) && [delegate processHitTest:event]) {
++            // Reported here as in the mouse handlers, since AppKit may take a press that drags the window before mouseDown: sees it.
++            SDL_SendWindowEvent([self findSDLWindow], SDL_EVENT_WINDOW_HIT_TEST, 0, 0);
++        }
++    }
++
+     [super sendEvent:event];
+ 
+     if ([event type] != NSEventTypeLeftMouseUp) {
